@@ -36,9 +36,23 @@ python predictor_web2.py
 
 终端会显示本地 Gradio 页面地址。首次运行时，如果配置模板不存在，应用会生成 `配置模板.xlsx`。
 
+## 启动 FastAPI 网页版
+
+仓库也包含基于 FastAPI 的网页后端和交互界面。下载 SAM 2.1 Large 权重到上面的 `checkpoints/` 目录后，运行：
+
+```powershell
+python sam_backen.py
+```
+
+在浏览器打开 <http://127.0.0.1:8000>。需要 GPT 辅助分析时，通过环境变量配置 `OPENAI_API_KEY`，或配置 `QWEN_API_KEY`；密钥不要写入源码或提交到 Git。
+
+SAM3 跟踪功能还需要另外准备 SAM3 源码和 `sam3.pt` 权重；这些大文件不包含在本仓库中。
+
 ## 项目结构
 
 - `predictor_web2.py`：Gradio 食材分割应用
+- `sam_backen.py`：FastAPI 后端
+- `index.html`、`concept_tracking.html`、`sam3_tracking.html`：浏览器交互界面
 - `sam2/`：SAM 2 源码与模型配置
 - `checkpoints/`：本地模型权重目录（权重不提交到 Git）
 - `配置模板.xlsx`：应用参数模板

@@ -10,3 +10,6 @@ matplotlib>=3.9.1
 pandas>=2.2.2
 openpyxl>=3.1.0
 gradio>=4.0
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9

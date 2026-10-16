@@ -1,0 +1,4471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>SAM2 分割可视化</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231976d2'/%3E%3Ctext x='16' y='22' font-size='16' text-anchor='middle' fill='white' font-family='Arial'%3ES%3C/text%3E%3C/svg%3E" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #f5f5f5; color: #333;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  }
+
+  /* ============ 四区布局：顶部栏 + 左栏 + 中间画布 + 右栏 ============ */
+  .app {
+    display: grid;
+    grid-template-columns: 300px 1fr 320px;
+    grid-template-rows: 48px 1fr;
+    grid-template-areas:
+      "topbar topbar topbar"
+      "toolside stage inspector";
+    width: 100vw; height: 100vh;
+  }
+
+  /* ---------- 顶部栏 ---------- */
+  .topbar {
+    grid-area: topbar;
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 16px;
+    background: #1e1e1e; color: #e0e0e0;
+    border-bottom: 1px solid #333;
+    z-index: 100;
+  }
+  .brand {
+    font-size: 14px; font-weight: 700; color: #fff;
+    letter-spacing: 0.5px; white-space: nowrap;
+  }
+  .brand span {
+    font-weight: 400; font-size: 12px;
+    color: #888; margin-left: 6px;
+  }
+  .topbar-group {
+    display: flex; align-items: center; gap: 6px;
+    margin-left: 24px;
+  }
+  .topbar-actions {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 12px; color: #aaa;
+  }
+  .topbar-label {
+    font-size: 11px; color: #888;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin: 0 4px;
+  }
+  .topbar-context {
+    font-size: 12px;
+    color: #b9c7da;
+    white-space: nowrap;
+  }
+  .topbar-divider {
+    width: 1px; height: 20px; background: #444;
+    margin: 0 6px;
+  }
+  .topbar-btn {
+    background: transparent; border: 1px solid transparent;
+    color: #ccc; font-size: 12px;
+    padding: 6px 14px; border-radius: 6px;
+    cursor: pointer; width: auto;
+    transition: all 0.2s ease;
+    font-weight: 500;
+  }
+  .topbar-btn:hover { 
+    background: rgba(78, 201, 176, 0.1); 
+    color: #4ec9b0;
+    transform: translateY(-1px);
+  }
+  .topbar-btn.active {
+    background: linear-gradient(135deg, #1976d2 0%, #42a5f5 100%);
+    color: #fff;
+    border-color: transparent;
+    box-shadow: 0 2px 8px rgba(25, 118, 210, 0.3);
+  }
+  .zoom-btn {
+    width: 24px; height: 24px;
+    background: #333; color: #ddd;
+    border: 1px solid #444; border-radius: 3px;
+    font-size: 14px; line-height: 1;
+    cursor: pointer; padding: 0;
+    transition: all 0.15s;
+  }
+  .zoom-btn:hover { background: #444; color: #fff; }
+  #zoomLabel { min-width: 40px; text-align: center; color: #ddd; }
+  #topImageMeta { color: #999; }
+
+  /* ---------- 左侧工具栏 ---------- */
+  .tool-sidebar {
+    grid-area: toolside;
+    display: flex; flex-direction: column;
+    background: #fafafa;
+    border-right: 1px solid #e0e0e0;
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .side-heading {
+    padding: 10px 14px 6px;
+    font-size: 11px; font-weight: 700;
+    color: #888; text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: #fafafa;
+  }
+  .category-heading, .tools-heading { border-top: 1px solid #eee; }
+
+  .asset-tree { padding: 4px 10px 10px; }
+  .asset-root {
+    font-size: 12px; color: #555;
+    font-weight: 600; padding: 4px 6px;
+  }
+  .asset-file {
+    font-size: 12px; color: #1976d2;
+    padding: 4px 6px 4px 20px;
+    white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .batch-assets {
+    max-height: 190px;
+    overflow-y: auto;
+    padding: 2px 8px 8px;
+  }
+  .batch-asset-empty {
+    padding: 8px 12px;
+    color: #858585;
+    font-size: 11px;
+  }
+  .batch-asset {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    min-height: 36px;
+    padding: 4px 7px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: #cccccc;
+    text-align: left;
+    cursor: pointer;
+  }
+  .batch-asset:hover { background: #2d2d30; }
+  .batch-asset.active {
+    background: #264f78;
+    border-color: #569cd6;
+  }
+  .batch-asset-thumb {
+    width: 30px;
+    height: 26px;
+    object-fit: cover;
+    border-radius: 3px;
+    background: #1e1e1e;
+    flex: 0 0 auto;
+  }
+  .batch-asset-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+  }
+  .batch-asset-index {
+    color: #858585;
+    font-size: 10px;
+    margin-left: auto;
+  }
+  .batch-asset-index.batch-ok { color: #4ec9b0; }
+  .batch-asset-index.batch-fail { color: #f48771; }
+  .batch-step {
+    margin-top: 12px;
+    padding-top: 11px;
+    border-top: 1px solid #3a3a3a;
+  }
+  .batch-step:first-of-type {
+    margin-top: 8px;
+    padding-top: 0;
+    border-top: 0;
+  }
+  .batch-step-title {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    margin-bottom: 7px;
+    color: #d4d4d4;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .batch-step-number {
+    color: #569cd6;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .batch-step-help {
+    margin: 0 0 8px;
+    color: #858585;
+    font-size: 10px;
+    line-height: 1.45;
+  }
+  .batch-file-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px;
+  }
+  .batch-file-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 7px 8px;
+    border: 1px solid #555;
+    border-radius: 5px;
+    background: #2d2d30;
+    color: #d4d4d4;
+    font-size: 11px;
+    cursor: pointer;
+    text-align: center;
+  }
+  .batch-file-btn:hover {
+    border-color: #569cd6;
+    background: #264f78;
+  }
+  .batch-file-btn input { display: none; }
+  .batch-file-summary {
+    min-height: 15px;
+    margin-top: 7px;
+    color: #9cdcfe;
+    font-size: 10px;
+    line-height: 1.35;
+  }
+  .batch-prompt-box {
+    padding: 9px;
+    border: 1px solid #3f3f46;
+    border-radius: 5px;
+    background: #252526;
+  }
+  .batch-prompt-label {
+    display: block;
+    margin: 0 0 5px;
+    color: #d4d4d4;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .batch-prompt-label small {
+    display: block;
+    margin-top: 3px;
+    color: #858585;
+    font-size: 10px;
+    font-weight: 400;
+  }
+  .batch-prompt-divider {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 8px 0;
+    color: #666;
+    font-size: 10px;
+  }
+  .batch-prompt-divider::before,
+  .batch-prompt-divider::after {
+    content: "";
+    height: 1px;
+    flex: 1;
+    background: #3f3f46;
+  }
+  .batch-engine {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    color: #4ec9b0;
+    font-size: 10px;
+  }
+  .batch-engine::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #4ec9b0;
+  }
+  .panel-kicker {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 4px;
+    padding: 2px 5px;
+    border: 1px solid #356f63;
+    border-radius: 3px;
+    color: #4ec9b0;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    vertical-align: 1px;
+  }
+  .batch-run {
+    margin-top: 12px;
+    padding-top: 11px;
+    border-top: 1px solid #3a3a3a;
+  }
+  .batch-run .primary {
+    width: 100%;
+    min-height: 36px;
+  }
+  .batch-status {
+    display: block;
+    margin-top: 7px;
+    color: #a8a8a8;
+    font-size: 10px;
+    line-height: 1.45;
+  }
+
+  .category-list { padding: 4px 8px; }
+  .category-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 8px; border-radius: 4px;
+    font-size: 13px; color: #333;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .category-item:hover { background: #f0f0f0; }
+  .category-item.selected {
+    background: #e3f2fd; color: #1565c0;
+    font-weight: 600;
+  }
+  .category-name {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    padding: 1px 0;
+  }
+  .category-name:focus {
+    border-bottom: 1px solid #1976d2;
+  }
+  .category-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.1);
+  }
+  .category-dot.red    { background: #e53935; }
+  .category-dot.green  { background: #43a047; }
+  .category-dot.blue   { background: #1e88e5; }
+  .category-dot.orange { background: #ff9800; }
+  .category-dot.purple { background: #9c27b0; }
+  .category-dot.teal   { background: #009688; }
+  .category-dot.pink   { background: #e91e63; }
+  .category-dot.amber  { background: #ffc107; }
+  .category-dot.lime   { background: #cddc39; }
+  .category-dot.indigo { background: #3f51b5; }
+  .category-dot.cyan   { background: #00bcd4; }
+  .category-dot.brown  { background: #795548; }
+  .category-dot.grey   { background: #9e9e9e; }
+
+  .category-actions {
+    display: flex; gap: 6px;
+    padding: 6px 10px 12px;
+  }
+  .icon-action {
+    flex: 1;
+    background: #fff; border: 1px solid #d0d0d0;
+    border-radius: 3px; color: #555;
+    font-size: 11px; padding: 4px 6px;
+    cursor: pointer; width: auto;
+    transition: all 0.15s;
+  }
+  .icon-action:hover {
+    background: #f0f0f0; color: #1976d2;
+    border-color: #1976d2;
+  }
+
+  .tool-mode-row { padding: 4px 10px; }
+  .tool-help { padding: 4px 14px 14px; }
+
+  input[type=file] {
+    width: calc(100% - 20px);
+    margin: 4px 10px 8px;
+    font-size: 12px; color: #666;
+  }
+  .side-button {
+    margin: 0 10px 12px;
+    width: calc(100% - 20px);
+    padding: 8px 10px;
+    background: #e8e8e8; color: #333;
+    border: none; border-radius: 4px;
+    font-size: 13px; cursor: pointer;
+    transition: background 0.15s;
+  }
+  .side-button:hover { background: #dcdcdc; }
+  .side-spacer { flex: 1 1 auto; min-height: 12px; }
+  .shortcut-hint {
+    padding: 10px 14px;
+    font-size: 11px; color: #999;
+    line-height: 1.6;
+    border-top: 1px solid #eee;
+    background: #f5f5f5;
+  }
+
+  /* ---------- 中间画布区 ---------- */
+  .stage {
+    grid-area: stage;
+    display: grid; grid-template-columns: 1fr;
+    gap: 12px; padding: 14px; background: #ececec;
+    min-width: 0; min-height: 0;
+  }
+
+  .view-panel {
+    background: #fff; border-radius: 8px;
+    border: 1px solid #e0e0e0;
+    display: flex; flex-direction: column;
+    overflow: hidden; min-width: 0; min-height: 0;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  }
+
+  .view-title {
+    padding: 8px 12px; background: #fafafa;
+    border-bottom: 1px solid #e0e0e0;
+    font-size: 11px; font-weight: 600; color: #666;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-shrink: 0;
+  }
+  .view-title .meta {
+    font-size: 11px; color: #2e7d32;
+    text-transform: none; font-weight: 400; letter-spacing: 0;
+  }
+
+  .canvas-wrap {
+    flex: 1; position: relative;
+    display: flex; align-items: center; justify-content: center;
+    background: #f0f0f0; overflow: hidden; min-height: 0;
+    touch-action: none;
+  }
+
+  .canvas-inner {
+    position: relative;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+    border-radius: 3px; overflow: hidden;
+    background: #fff; flex-shrink: 0;
+  }
+
+  .canvas-inner canvas {
+    position: absolute; top: 0; left: 0; display: block;
+  }
+
+  #renderedImg {
+    position: absolute; top: 0; left: 0;
+    display: block; width: 100%; height: 100%;
+    object-fit: fill;
+    opacity: 1;
+    transition: opacity 0.22s ease-out;
+  }
+  #renderedImg.fading { opacity: 0.15; }
+
+  #canvasOverlay { z-index: 3; cursor: crosshair; }
+
+  /* 隐藏原图面板（单画布模式） */
+  .stage .view-panel:first-child { display: none; }
+  .stage .view-panel:last-child { height: 100%; }
+
+  @keyframes pulseAnim {
+    0%   { box-shadow: 0 0 0 0    rgba(25,118,210,0.85); opacity: 1; }
+    60%  { box-shadow: 0 0 0 22px rgba(25,118,210,0.00); opacity: 0.9; }
+    100% { box-shadow: 0 0 0 0    rgba(25,118,210,0.00); opacity: 0; }
+  }
+  .pulse-dot {
+    position: absolute; width: 10px; height: 10px;
+    margin-left: -5px; margin-top: -5px;
+    border-radius: 50%;
+    background: rgba(25, 118, 210, 0.95);
+    pointer-events: none; z-index: 10;
+    animation: pulseAnim 0.9s ease-out forwards;
+  }
+
+  @keyframes newBadgeAnim {
+    0%, 100% { background: #2e7d32; color: #fff; }
+    50%      { background: #81c784; color: #1b5e20; }
+  }
+  .instance-tag.new {
+    animation: newBadgeAnim 0.9s ease-in-out 2;
+    background: #2e7d32; color: #fff;
+  }
+
+  /* ---------- 右侧检查器 ---------- */
+  .inspector {
+    grid-area: inspector;
+    display: flex; flex-direction: column;
+    background: #fff;
+    border-left: 1px solid #e0e0e0;
+    min-height: 0; overflow-y: auto; overflow-x: hidden;
+  }
+  .inspector-heading {
+    padding: 10px 14px;
+    font-size: 11px; font-weight: 700;
+    color: #888; text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: #fafafa;
+    border-bottom: 1px solid #eee;
+    order: -2;
+  }
+  .inspector-section {
+    padding: 10px 14px;
+    border-bottom: 1px solid #eee;
+    flex: 0 0 auto;
+  }
+  .inspector-section.instance-section {
+    flex: 1 1 230px;
+    min-height: 180px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    padding-bottom: 0;
+  }
+  .inspector-title {
+    font-size: 11px; font-weight: 600;
+    color: #888; text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .property-row {
+    display: flex; justify-content: space-between;
+    font-size: 12px; padding: 3px 0;
+    color: #666;
+  }
+  .property-row strong {
+    color: #333; font-weight: 500;
+    max-width: 60%;
+    text-align: right;
+    overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .selected-object {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0 8px;
+    font-size: 13px; color: #333;
+  }
+  .selection-swatch {
+    width: 14px; height: 14px;
+    border-radius: 3px;
+    background: linear-gradient(135deg, #1976d2, #64b5f6);
+    flex-shrink: 0;
+  }
+
+  /* ---------- 通用面板（右栏里的识别/导出等） ---------- */
+  .panel {
+    flex: 0 0 auto;
+    padding: 12px 14px;
+    border-bottom: 1px solid #eee;
+  }
+  .panel h3 {
+    font-size: 11px; font-weight: 600; color: #888;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+
+  .mini-btn {
+    background: transparent; border: 1px solid #d0d0d0;
+    border-radius: 3px; color: #666;
+    font-size: 11px; padding: 2px 8px;
+    cursor: pointer; text-transform: none;
+    letter-spacing: 0; font-weight: 400;
+    width: auto; transition: all 0.15s;
+  }
+  .mini-btn:hover {
+    background: #f0f0f0; color: #1976d2;
+    border-color: #1976d2;
+  }
+  .mini-btn.spinning { animation: spin 0.8s linear infinite; }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+
+  button {
+    padding: 8px 10px;
+    background: #1976d2; color: #fff;
+    border: none; border-radius: 4px;
+    font-size: 13px; cursor: pointer;
+    transition: background 0.15s;
+    width: 100%;
+  }
+  button:hover { background: #1565c0; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.secondary { background: #e8e8e8; color: #333; }
+  button.secondary:hover:not(:disabled) { background: #dcdcdc; }
+  button.primary { background: #2e7d32; color: #fff; }
+  button.primary:hover:not(:disabled) { background: #1b5e20; }
+  button.pile { background: #e65100; color: #fff; }
+  button.pile:hover:not(:disabled) { background: #bf360c; }
+
+  .btn-row { display: flex; gap: 8px; }
+  .btn-row > button { flex: 1; }
+
+  select {
+    width: 100%; padding: 6px 8px;
+    border: 1px solid #d0d0d0; border-radius: 4px;
+    font-size: 12px; background: #fff;
+    color: #333; margin-bottom: 8px; cursor: pointer;
+  }
+
+  .mode-row { display: flex; gap: 6px; }
+
+  .mode-btn {
+    flex: 1; padding: 7px 4px;
+    background: #e8e8e8; color: #555;
+    border: 1px solid transparent;
+    border-radius: 4px; font-size: 12px; cursor: pointer;
+    transition: all 0.12s;
+    display: flex; flex-direction: column;
+    align-items: center; gap: 2px;
+  }
+  .mode-btn:hover { background: #dcdcdc; }
+  .mode-btn.active {
+    background: #1976d2; color: #fff;
+    border-color: #1565c0;
+  }
+  .mode-btn .tool-icon { font-size: 14px; line-height: 1; }
+  .mode-btn small { font-size: 9px; opacity: 0.7; }
+
+  .mode-help {
+    font-size: 11px; color: #888;
+    line-height: 1.55; margin-top: 8px;
+  }
+
+  .status {
+    padding: 10px 14px; background: #fafafa;
+    font-size: 12px; color: #1565c0;
+    border-bottom: 1px solid #eee;
+    min-height: 38px; word-break: break-all;
+  }
+  .status.error   { color: #c62828; }
+  .status.success { color: #2e7d32; }
+
+  .instance-list {
+    flex: 1 1 0;
+    min-height: 120px;
+    overflow-y: auto;
+    padding: 6px 0 10px;
+  }
+
+  .instance-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px;
+    background: #fafafa; border: 1px solid #e0e0e0;
+    border-radius: 4px; margin-bottom: 5px;
+    cursor: pointer; font-size: 12px; color: #333;
+    transition: all 0.12s;
+  }
+  .instance-item:hover { border-color: #999; }
+  .instance-item.active { border-color: #1976d2; background: #e3f2fd; }
+
+  .color-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    flex-shrink: 0;
+  }
+
+  .instance-id { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .instance-confidence {
+    font-size: 10px; color: #555; min-width: 38px; text-align: right;
+  }
+
+  .instance-tag {
+    font-size: 10px; padding: 1px 6px;
+    border-radius: 3px; background: #ececec; color: #666;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .instance-tag.tag-auto       { background: #e1f5fe; color: #01579b; }
+  .instance-tag.tag-auto_fine  { background: #f3e5f5; color: #6a1b9a; }
+  .instance-tag.tag-color_fine { background: #fff3e0; color: #e65100; }
+  .instance-tag.tag-pile       { background: #fbe9e7; color: #bf360c; }
+  .instance-tag.tag-amg        { background: #ececec; color: #666; }
+  .instance-tag.tag-prompt     { background: #e8f5e9; color: #1b5e20; }
+
+  .instance-del {
+    background: transparent; border: none; color: #999;
+    cursor: pointer; font-size: 16px;
+    line-height: 1; padding: 0 4px;
+    width: auto; flex: none;
+  }
+  .instance-del:hover { color: #c62828; background: transparent; }
+
+  .empty {
+    color: #999; font-size: 13px;
+    padding: 20px 0; text-align: center;
+  }
+
+  .inspector-footer {
+    padding: 10px 14px;
+    border-top: 1px solid #eee;
+    background: #fafafa;
+    flex-shrink: 0;
+  }
+  .inspector-footer button { width: 100%; }
+
+  #recognizeLog {
+    max-height: 220px;
+    overflow-y: auto;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: 'Consolas', 'Monaco', monospace;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  #roiModal {
+    display: none;
+    position: fixed; top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background: rgba(0, 0, 0, 0.75);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+  }
+  #roiModal.show { display: flex; }
+  #roiModal .modal-body {
+    background: #fff;
+    border-radius: 8px;
+    max-width: 90vw; max-height: 90vh;
+    padding: 16px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  #roiModal h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #333;
+    margin-bottom: 12px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  #roiModal img {
+    max-width: 100%; max-height: 70vh;
+    object-fit: contain;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+  }
+  #roiModal .close-btn {
+    background: transparent;
+    border: none;
+    color: #999;
+    font-size: 24px;
+    cursor: pointer;
+    width: auto;
+    padding: 0 8px;
+    line-height: 1;
+  }
+  #roiModal .close-btn:hover {
+    color: #c62828;
+    background: transparent;
+  }
+  #roiModal .hint {
+    font-size: 12px;
+    color: #666;
+    margin-top: 10px;
+    line-height: 1.6;
+  }
+  #roiModal .hint code {
+    background: #f0f0f0;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-family: 'Consolas', monospace;
+    color: #c62828;
+  }
+
+  .pile-params {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .pile-params label {
+    font-size: 11px;
+    color: #666;
+    display: flex;
+    flex-direction: column;
+  }
+  .pile-params input, .pile-params select {
+    width: 100%;
+    padding: 4px 6px;
+    border: 1px solid #d0d0d0;
+    border-radius: 3px;
+    font-size: 12px;
+    margin-top: 2px;
+    margin-bottom: 0;
+  }
+
+  #textNames {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+
+  /* ---------- 工作台增强 ---------- */
+  :root {
+    --ink: #172033;
+    --muted: #718096;
+    --line: #dce3ec;
+    --surface: #ffffff;
+    --surface-soft: #f7f9fc;
+    --accent: #2563eb;
+    --accent-soft: #eaf1ff;
+    --success: #16835b;
+    --shadow: 0 12px 32px rgba(31, 45, 61, 0.08);
+  }
+
+  html, body {
+    background: #edf1f6;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .app {
+    grid-template-columns: 272px minmax(420px, 1fr) 360px;
+    grid-template-rows: 58px minmax(0, 1fr);
+  }
+
+  .topbar {
+    padding: 0 20px;
+    gap: 18px;
+    background: #172033;
+    border-bottom-color: #27334a;
+    box-shadow: 0 2px 12px rgba(23, 32, 51, 0.18);
+  }
+  .brand {
+    font-size: 15px;
+    letter-spacing: 0;
+  }
+  .brand::before {
+    content: "✦";
+    display: inline-grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    margin-right: 9px;
+    border-radius: 7px;
+    background: #3b82f6;
+    color: white;
+    font-size: 14px;
+  }
+  .brand span { color: #aab6c9; }
+  .topbar-group { margin-left: 12px; gap: 4px; }
+  .topbar-label { color: #8997ad; }
+  .topbar-btn {
+    padding: 7px 11px;
+    border-radius: 7px;
+    color: #c5d0df;
+  }
+  .topbar-btn:hover { background: #27334a; }
+  .topbar-btn.active {
+    background: #3b82f6;
+    border-color: #3b82f6;
+  }
+  .topbar-actions { gap: 8px; color: #b4c0d2; }
+  .zoom-btn {
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: #27334a;
+    border-color: #3a4961;
+  }
+
+  .tool-sidebar, .inspector {
+    background: var(--surface);
+    border-color: var(--line);
+  }
+  .tool-sidebar { box-shadow: 8px 0 24px rgba(31, 45, 61, 0.04); }
+  .side-heading, .inspector-heading {
+    padding: 14px 16px 9px;
+    color: #526179;
+    background: var(--surface);
+    border-color: var(--line);
+  }
+  .side-heading:first-child {
+    color: var(--ink);
+    font-size: 12px;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .asset-tree {
+    padding: 6px 12px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .asset-root {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .asset-file {
+    margin-top: 4px;
+    padding: 9px 10px 9px 28px;
+    border-radius: 8px;
+    background: var(--surface-soft);
+    color: var(--ink);
+    font-size: 12px;
+  }
+  .category-list { padding: 5px 10px; }
+  .category-item {
+    padding: 8px 10px;
+    border-radius: 8px;
+  }
+  .category-item.selected { background: var(--accent-soft); color: #1d4ed8; }
+  .category-actions { padding: 6px 12px 14px; }
+  .icon-action, .mini-btn {
+    border-color: var(--line);
+    border-radius: 7px;
+    background: var(--surface-soft);
+  }
+  .icon-action:hover, .mini-btn:hover {
+    background: var(--accent-soft);
+    border-color: #a8c2ff;
+  }
+  .tools-heading { border-top-color: var(--line); }
+  .tool-mode-row { padding: 7px 12px; }
+  .mode-btn {
+    min-height: 62px;
+    padding: 8px 5px;
+    border-color: var(--line);
+    background: var(--surface-soft);
+    border-radius: 9px;
+  }
+  .mode-btn:hover { background: #eef3fa; }
+  .mode-btn.active {
+    background: var(--accent-soft);
+    color: #1d4ed8;
+    border-color: #9dbaff;
+  }
+  .mode-btn .tool-icon { font-size: 17px; }
+  .mode-help {
+    margin: 3px 12px 14px;
+    padding: 9px 10px;
+    border-left: 3px solid #9dbaff;
+    border-radius: 0 7px 7px 0;
+    background: var(--accent-soft);
+    color: #526179;
+  }
+  .upload-dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    margin: 4px 12px 10px;
+    padding: 15px 10px;
+    border: 1px dashed #aebbd0;
+    border-radius: 10px;
+    background: #fbfcfe;
+    color: #42526b;
+    cursor: pointer;
+    text-align: center;
+    transition: 0.18s ease;
+  }
+  .upload-dropzone:hover, .upload-dropzone.dragover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    transform: translateY(-1px);
+  }
+  .upload-dropzone .upload-icon { font-size: 22px; color: var(--accent); }
+  .upload-dropzone strong { font-size: 13px; }
+  .upload-dropzone small { color: var(--muted); font-size: 10px; }
+  .upload-dropzone input { display: none; }
+  .side-button {
+    margin: 0 12px 14px;
+    width: calc(100% - 24px);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface-soft);
+    color: #526179;
+  }
+  .side-button:hover { background: #eef3fa; }
+  .shortcut-hint {
+    border-color: var(--line);
+    background: #f7f9fc;
+    color: var(--muted);
+  }
+
+  .stage {
+    gap: 16px;
+    padding: 18px;
+    background:
+      linear-gradient(rgba(255,255,255,.45) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.45) 1px, transparent 1px),
+      #e9eef5;
+    background-size: 24px 24px;
+  }
+  .stage.dragover {
+    outline: 3px solid rgba(59,130,246,.55);
+    outline-offset: -5px;
+    background-color: #dce8fb;
+  }
+  .view-panel {
+    border-color: var(--line);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+  }
+  .view-title {
+    padding: 11px 14px;
+    color: #526179;
+    background: rgba(247,249,252,.9);
+    border-color: var(--line);
+  }
+  .canvas-wrap {
+    background: #dfe6ef;
+  }
+  .canvas-inner {
+    border-radius: 6px;
+    box-shadow: 0 14px 30px rgba(31, 45, 61, 0.2);
+  }
+  .canvas-empty {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    text-align: center;
+    color: #62728a;
+    pointer-events: none;
+  }
+  .canvas-empty-card {
+    max-width: 360px;
+    padding: 30px 34px;
+    border: 1px solid rgba(255,255,255,.85);
+    border-radius: 16px;
+    background: rgba(255,255,255,.82);
+    box-shadow: 0 16px 34px rgba(31,45,61,.12);
+    backdrop-filter: blur(8px);
+  }
+  .canvas-empty-icon { font-size: 36px; margin-bottom: 10px; }
+  .canvas-empty h2 { color: var(--ink); font-size: 18px; margin-bottom: 7px; }
+  .canvas-empty p { font-size: 12px; line-height: 1.6; margin-bottom: 16px; }
+  .canvas-empty button {
+    width: auto;
+    padding: 9px 17px;
+    border-radius: 8px;
+    pointer-events: auto;
+  }
+  .canvas-empty.hidden { display: none; }
+  .canvas-wrap.zoomed { overflow: auto; }
+
+  .inspector-heading {
+    color: var(--ink);
+    font-size: 12px;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .inspector-section, .panel { border-color: var(--line); }
+  .inspector-section { padding: 13px 16px; }
+  .panel { padding: 14px 16px; }
+  .inspector-title, .panel h3 { color: #526179; }
+  .property-row { padding: 4px 0; }
+  .selected-object { padding: 8px 0 10px; }
+  .inspector-edit-hint {
+    float: right;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 400;
+  }
+  .inspector-field {
+    display: block;
+    margin: 2px 0 8px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .inspector-field input {
+    display: block;
+    width: 100%;
+    min-height: 36px;
+    margin-top: 5px;
+    padding: 7px 9px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fbfcfe;
+    color: var(--ink);
+  }
+  .inspector-save {
+    width: 100%;
+    margin-bottom: 7px;
+  }
+  .instance-adjust {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+  }
+  .instance-adjust input[type=range] {
+    width: 100%;
+    accent-color: #569cd6;
+    cursor: pointer;
+  }
+  .instance-adjust output {
+    color: #9cdcfe;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .range-labels {
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: 10px;
+    margin-top: -2px;
+  }
+  .adjust-note {
+    display: block;
+    margin-top: 7px;
+    color: var(--muted);
+    font-size: 10px;
+    line-height: 1.45;
+  }
+  .instance-item {
+    padding: 9px 10px;
+    border-color: var(--line);
+    border-radius: 8px;
+    background: #fbfcfe;
+  }
+  .instance-item:hover { border-color: #9dbaff; background: #f7faff; }
+  .instance-item.active { border-color: #7fa5ff; background: var(--accent-soft); }
+  .instance-list { padding: 6px 0 12px; }
+  button, select, input[type=text], input[type=number] { border-radius: 8px; }
+  button { min-height: 36px; font-weight: 600; }
+  button.secondary { border: 1px solid var(--line); }
+  button.primary { background: var(--success); }
+  button.primary:hover:not(:disabled) { background: #106b49; }
+  select, #textNames, .pile-params input, .pile-params select {
+    min-height: 36px;
+    border-color: var(--line);
+    background: #fbfcfe;
+  }
+  select:focus, input:focus, button:focus-visible {
+    outline: 3px solid rgba(59,130,246,.2);
+    outline-offset: 1px;
+    border-color: #7fa5ff;
+  }
+  .status {
+    margin: 10px 12px 12px;
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    background: #f7f9fc;
+    color: #3459a5;
+  }
+  .status.success { color: #126b4a; background: #ecf9f3; border-color: #b9e6d2; }
+  .status.error { color: #ae2b38; background: #fff2f3; border-color: #f1c1c7; }
+  .panel h3 { margin-bottom: 10px; }
+  .detection-panel {
+    background: linear-gradient(180deg, #fff, #fbfcfe);
+  }
+  #textDetectionPanel {
+    order: -1;
+    padding: 16px;
+    border: 1px solid #bfd2ff;
+    border-radius: 12px;
+    margin: 12px;
+    background: linear-gradient(145deg, #f8fbff, #ffffff);
+    box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+  }
+  #textDetectionPanel h3 {
+    color: #1d4ed8;
+    font-size: 13px;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .task-switch {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .task-switch button {
+    min-height: 42px;
+    border: 1px solid #cbd7ec;
+    background: #fff;
+    color: #526179;
+    font-size: 12px;
+  }
+  .task-switch button.active {
+    border-color: #3b82f6;
+    background: #eaf1ff;
+    color: #1d4ed8;
+  }
+  .workflow-label {
+    display: block;
+    margin: 0 0 6px;
+    color: #526179;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .workflow-label small {
+    float: right;
+    color: #8b99ad;
+    font-weight: 400;
+  }
+  #textNames {
+    min-height: 42px;
+    margin-bottom: 10px;
+  }
+  #textDetectBtn {
+    min-height: 42px;
+    font-size: 13px;
+  }
+  .workflow-note {
+    margin: 9px 0 0;
+    color: #718096;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  .text-task-control { display: none !important; }
+  .model-status {
+    display: block;
+    margin-top: 3px;
+    color: #858585;
+    font-size: 10px;
+    font-weight: 400;
+  }
+  .advanced-toggle {
+    margin-top: 10px;
+    min-height: 32px;
+    font-size: 11px;
+  }
+  .advanced-note {
+    margin: 7px 0 0;
+    color: #858585;
+    font-size: 10px;
+    line-height: 1.45;
+  }
+  .batch-config-label {
+    display: block;
+    margin: 8px 0;
+    color: #858585;
+    font-size: 11px;
+  }
+  .batch-folder-label {
+    display: block;
+    margin: 6px 12px 10px;
+    padding: 7px 9px;
+    border: 1px dashed #555;
+    border-radius: 6px;
+    color: #9cdcfe;
+    font-size: 11px;
+    text-align: center;
+    cursor: pointer;
+  }
+  .batch-folder-label:hover {
+    background: #264f78;
+    border-color: #569cd6;
+  }
+  .batch-folder-label input { display: none; }
+  .batch-config-label input {
+    display: block;
+    width: 100%;
+    margin: 5px 0 0;
+  }
+
+  /* ---------- VS Code 风格深色工作台 ---------- */
+  html, body {
+    background: #1e1e1e;
+    color: #d4d4d4;
+  }
+  .topbar {
+    background: #181818;
+    border-bottom-color: #333;
+  }
+  .brand { color: #f3f3f3; }
+  .brand span, .topbar-label { color: #858585; }
+  .topbar-context { color: #9cdcfe; }
+  .zoom-btn {
+    background: #252526;
+    border-color: #3c3c3c;
+    color: #d4d4d4;
+  }
+  .zoom-btn:hover { background: #333; }
+  #zoomLabel, #topImageMeta { color: #9d9d9d; }
+
+  .tool-sidebar, .inspector {
+    background: #252526;
+    color: #d4d4d4;
+    border-color: #3c3c3c;
+  }
+  .side-heading, .inspector-heading {
+    background: #252526;
+    color: #858585;
+    border-color: #3c3c3c;
+  }
+  .asset-root, .asset-file, .property-row,
+  .inspector-title, .workflow-note, .mode-help,
+  .shortcut-hint, .model-status {
+    color: #858585;
+  }
+  .asset-file { color: #4fc1ff; }
+  .category-item { color: #cccccc; }
+  .category-item:hover, .category-item.selected {
+    background: #37373d;
+    color: #9cdcfe;
+  }
+  .category-name {
+    color: inherit;
+    background: transparent;
+  }
+  .category-name:focus { border-color: #569cd6; }
+  .category-actions { border-color: #3c3c3c; }
+  .icon-action, .side-button, button.secondary, .mini-btn {
+    background: #2d2d30;
+    border-color: #3c3c3c;
+    color: #cccccc;
+  }
+  .icon-action:hover, .side-button:hover,
+  button.secondary:hover:not(:disabled), .mini-btn:hover {
+    background: #3e3e42;
+    border-color: #569cd6;
+    color: #9cdcfe;
+  }
+  .tool-help {
+    background: #2d2d30;
+    border-left-color: #569cd6;
+  }
+  .mode-btn {
+    background: #2d2d30;
+    border-color: #3c3c3c;
+    color: #cccccc;
+  }
+  .mode-btn:hover { background: #3e3e42; }
+  .mode-btn.active {
+    background: #264f78;
+    border-color: #569cd6;
+    color: #ffffff;
+  }
+  .upload-dropzone {
+    background: #1e1e1e;
+    border-color: #555;
+    color: #cccccc;
+  }
+  .upload-dropzone:hover, .upload-dropzone.dragover {
+    background: #264f78;
+    border-color: #569cd6;
+  }
+  .shortcut-hint {
+    background: #1e1e1e;
+    border-color: #3c3c3c;
+  }
+  .stage {
+    background:
+      linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px),
+      #181818;
+    background-size: 24px 24px;
+  }
+  .view-panel, .panel, .inspector-section {
+    background: #252526;
+    border-color: #3c3c3c;
+    box-shadow: none;
+  }
+  .view-title {
+    background: #2d2d30;
+    color: #cccccc;
+    border-color: #3c3c3c;
+  }
+  .view-title .meta { color: #4ec9b0; }
+  .canvas-wrap { background: #1e1e1e; }
+  .canvas-inner { box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+  .inspector-heading { color: #cccccc; }
+  .property-row strong, .selected-object, .inspector-field,
+  .inspector-field input { color: #d4d4d4; }
+  .inspector-field input, select, #textNames,
+  .pile-params input, .pile-params select {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border-color: #3c3c3c;
+  }
+  select option { background: #1e1e1e; color: #d4d4d4; }
+  .instance-item {
+    background: #2d2d30;
+    border-color: #3c3c3c;
+    color: #cccccc;
+  }
+  .instance-item:hover { background: #37373d; border-color: #569cd6; }
+  .instance-item.active { background: #264f78; border-color: #569cd6; }
+  .instance-confidence { color: #858585; }
+  .instance-tag.tag-prompt, .instance-tag.tag-amg,
+  .instance-tag.tag-auto, .instance-tag.tag-auto_fine,
+  .instance-tag.tag-color_fine, .instance-tag.tag-pile {
+    background: #3a3d41;
+    color: #9cdcfe;
+  }
+  #textDetectionPanel {
+    background: #252526;
+    border-color: #569cd6;
+    box-shadow: 0 8px 20px rgba(0,0,0,.22);
+  }
+  #textDetectionPanel h3 { color: #9cdcfe; }
+  .task-switch button {
+    background: #2d2d30;
+    border-color: #3c3c3c;
+    color: #cccccc;
+  }
+  .task-switch button.active {
+    background: #264f78;
+    border-color: #569cd6;
+    color: #fff;
+  }
+  button.primary { background: #0e639c; }
+  button.primary:hover:not(:disabled) { background: #1177bb; }
+  button.pile { background: #9a6700; }
+  button.pile:hover:not(:disabled) { background: #b07a00; }
+  .status {
+    background: #252526;
+    color: #9cdcfe;
+    border-color: #3c3c3c;
+  }
+  .status.success {
+    color: #4ec9b0;
+    background: #203b35;
+    border-color: #2d6b5b;
+  }
+  .status.error {
+    color: #f48771;
+    background: #3b2525;
+    border-color: #7f3a35;
+  }
+  .canvas-empty-card {
+    background: rgba(37,37,38,.94);
+    border-color: #3c3c3c;
+    color: #cccccc;
+  }
+  .canvas-empty h2 { color: #d4d4d4; }
+  input:focus, select:focus, button:focus-visible {
+    outline-color: rgba(86,156,214,.35);
+    border-color: #569cd6;
+  }
+  .advanced-panel { display: none; }
+  .advanced-panel.visible { display: block; }
+
+  @media (max-width: 1180px) {
+    .app { grid-template-columns: 238px minmax(360px, 1fr) 310px; }
+    .topbar { padding: 0 14px; gap: 10px; }
+    .topbar-actions #topImageMeta { display: none; }
+  }
+  @media (max-width: 900px) {
+    html, body { overflow: auto; }
+    .app {
+      min-height: 100vh;
+      height: auto;
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto minmax(480px, 62vh) auto;
+      grid-template-areas: "topbar" "toolside" "stage" "inspector";
+    }
+    .topbar { flex-wrap: wrap; min-height: 58px; padding: 10px 14px; }
+    .topbar-group { order: 3; width: 100%; margin-left: 0; }
+    .topbar-actions { margin-left: auto; }
+    .tool-sidebar { max-height: 330px; }
+    .stage { min-height: 480px; }
+    .inspector { max-height: none; overflow-y: visible; }
+    .inspector-section.instance-section { min-height: 180px; }
+  }
+</style>
+</head>
+
+<body>
+  <div class="app">
+    <!-- ============ 顶部栏 ============ -->
+    <header class="topbar">
+      <div class="brand">SAM2 <span>Annotate &amp; Detect</span></div>
+      <div class="topbar-group">
+        <span class="topbar-label">工作区</span>
+        <span class="topbar-context" id="topWorkflowContext">右侧选择任务并执行</span>
+      </div>
+      <div class="topbar-actions">
+        <span id="topImageMeta">未加载图片</span>
+        <a href="/concept-tracking" title="打开概念分割追踪工作台" style="color:#4ec9b0;text-decoration:none;font-size:12px;white-space:nowrap">概念追踪 ↗</a>
+        <a href="/sam3-tracking" title="SAM3 原生视频追踪" style="color:#2eaadc;text-decoration:none;font-size:12px;white-space:nowrap">视频追踪1 ↗</a>
+        <a href="/concept-tracking" title="现有 YOLO-World + SAM2 视频追踪" style="color:#d29922;text-decoration:none;font-size:12px;white-space:nowrap">视频追踪2 ↗</a>
+        <button class="zoom-btn" id="zoomOutBtn" title="缩小">−</button>
+        <span id="zoomLabel">100%</span>
+        <button class="zoom-btn" id="zoomInBtn" title="放大">+</button>
+      </div>
+    </header>
+
+    <!-- ============ 左侧工具栏 ============ -->
+    <aside class="tool-sidebar">
+      <div class="side-heading">资源管理器</div>
+      <div class="asset-tree">
+        <div class="asset-root">项目图片</div>
+        <div class="asset-file" id="assetFileLabel">尚未上传图片</div>
+        <div class="batch-assets" id="batchAssetList">
+          <div class="batch-asset-empty">选择批量图片后会显示在这里</div>
+        </div>
+      </div>
+
+      <div class="side-heading category-heading">手工标注类别</div>
+      <div class="category-list" id="categoryList">
+        <div class="category-item selected" data-category="object">
+          <i class="category-dot red"></i><input class="category-name" value="object" aria-label="类别名称">
+        </div>
+        <div class="category-item" data-category="food">
+          <i class="category-dot green"></i><input class="category-name" value="food" aria-label="类别名称">
+        </div>
+        <div class="category-item" data-category="ingredient">
+          <i class="category-dot blue"></i><input class="category-name" value="ingredient" aria-label="类别名称">
+        </div>
+      </div>
+      <div class="category-actions">
+        <button class="icon-action" title="新建类别">＋ 新建</button>
+        <button class="icon-action" title="删除类别">− 删除</button>
+      </div>
+
+      <div class="side-heading tools-heading">标注功能</div>
+      <div class="mode-row tool-mode-row">
+        <button class="mode-btn active" data-mode="point"><span class="tool-icon">⌖</span><span>选择</span><small>V</small></button>
+        <button class="mode-btn" data-mode="box"><span class="tool-icon">□</span><span>矩形框</span><small>R</small></button>
+        <button class="mode-btn" data-mode="refine"><span class="tool-icon">◇</span><span>点选细化</span><small>P</small></button>
+      </div>
+      <div class="mode-help tool-help" id="modeHelp">点击已有 mask 选择实例；点击空白创建新实例</div>
+
+      <div class="side-heading">上传图片</div>
+      <label class="upload-dropzone" for="fileInput">
+        <span class="upload-icon">↑</span>
+        <strong>上传图片</strong>
+        <small>支持 JPG、PNG、WEBP，也可直接拖入</small>
+        <input type="file" id="fileInput" accept="image/*" />
+      </label>
+      <button id="resetBtn" class="side-button">清空当前图片</button>
+      <div class="side-spacer"></div>
+      <div class="shortcut-hint">选择工具后在中央画布操作<br>支持图片检测、分割和点选修复</div>
+    </aside>
+
+    <!-- ============ 中间画布区 ============ -->
+    <div class="stage">
+      <div class="view-panel">
+        <div class="view-title">
+          <span>📷 原图</span>
+          <span class="meta" id="originMeta"></span>
+        </div>
+        <div class="canvas-wrap">
+          <div class="canvas-inner" id="originInner">
+            <canvas id="canvasOrigin"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <div class="view-panel">
+        <div class="view-title">
+          <span>🖼️ 图像工作区</span>
+          <span class="meta" id="maskMeta">全部实例</span>
+        </div>
+        <div class="canvas-wrap">
+          <div class="canvas-inner" id="maskInner">
+            <img id="renderedImg" alt="" />
+            <canvas id="canvasOverlay"></canvas>
+          </div>
+          <div class="canvas-empty" id="canvasEmpty">
+            <div class="canvas-empty-card">
+              <div class="canvas-empty-icon">◌</div>
+              <h2>从一张图片开始</h2>
+              <p>上传图片后，可以用点选、矩形框或自动识别创建分割实例。</p>
+              <button id="emptyUploadBtn" type="button">选择图片</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 右侧检查器 ============ -->
+    <aside class="inspector">
+      <div class="inspector-heading">检查器</div>
+
+      <div class="inspector-section">
+        <div class="inspector-title">属性</div>
+        <div class="property-row"><span>文件</span><strong id="inspectorFile">未加载</strong></div>
+        <div class="property-row"><span>尺寸</span><strong id="inspectorSize">-</strong></div>
+        <div class="property-row"><span>标注数</span><strong id="inspectorCount">0</strong></div>
+      </div>
+      <div class="status" id="status">等待上传图片</div>
+
+      <div class="inspector-section selected-section">
+        <div class="inspector-title">已选择 <span class="inspector-edit-hint">可编辑名称</span></div>
+        <div class="selected-object"><span class="selection-swatch"></span><strong id="inspectorSelected">暂无选择</strong></div>
+        <label class="inspector-field">实例名称
+          <input id="inspectorName" type="text" placeholder="选择实例后编辑名称" disabled>
+        </label>
+        <button id="saveInspectorBtn" class="secondary inspector-save" disabled>保存实例名称</button>
+        <div class="property-row"><span>任务</span><strong id="inspectorTask">-</strong></div>
+        <div class="property-row"><span>置信度</span><strong id="inspectorConfidence">-</strong></div>
+        <div class="instance-adjust">
+          <div class="inspector-title">
+            <span>边缘微调</span>
+            <output id="morphValue">0</output>
+          </div>
+          <input id="morphSlider" type="range" min="-10" max="10" step="1" value="0" disabled>
+          <div class="range-labels"><span>收缩</span><span>原始</span><span>膨胀</span></div>
+          <div class="btn-row">
+            <button id="morphResetBtn" class="secondary" disabled>重置</button>
+            <button id="morphCommitBtn" class="primary" disabled>应用</button>
+          </div>
+          <small class="adjust-note">拖动滑块调整当前实例边缘，不会影响其他实例。</small>
+        </div>
+      </div>
+
+      <div class="inspector-section instance-section">
+        <div class="inspector-title">
+          <span>实例列表 <span id="countLabel"></span></span>
+          <button class="mini-btn" id="refreshListBtn">刷新</button>
+        </div>
+        <div class="instance-list" id="instanceList"><div class="empty">暂无实例</div></div>
+      </div>
+
+      <div class="panel">
+        <h3>导出与识别</h3>
+        <div class="btn-row">
+          <button id="exportAllBtn" class="secondary">导出全部JSON</button>
+          <button id="exportSelBtn" class="secondary" disabled>导出选中</button>
+        </div>
+        <div class="btn-row" style="margin-top:8px;">
+          <button id="exportZipBtn" class="primary" disabled>📦 下载完整结果包</button>
+        </div>
+      </div>
+
+        <div class="panel detection-panel" id="textDetectionPanel">
+        <h3>按名称开始工作 <span id="workflowTaskTitle">图像分割</span></h3>
+        <div class="task-switch" role="group" aria-label="任务类型">
+          <button type="button" id="taskSegBtn" class="active" data-task="segmentation">图像分割</button>
+          <button type="button" id="taskDetBtn" data-task="detection">图像检测</button>
+        </div>
+        <label class="workflow-label" for="textNames">
+          要处理的物体名称
+          <small>多个名称用逗号分隔</small>
+        </label>
+        <input id="textNames" type="text" placeholder="例如：苹果、杯子、人物" value="person, car">
+        <div class="pile-params">
+          <label class="text-task-control">任务类型
+            <select id="textTask">
+              <option value="segmentation">分割多边形</option>
+              <option value="detection">仅检测框</option>
+            </select>
+          </label>
+          <label>置信度
+            <input type="number" id="textConfidence" value="0.25" min="0.01" max="0.99" step="0.01">
+          </label>
+          <label>模型
+            <select id="worldModel">
+              <option value="yolov8s-world.pt">YOLO-World Small（推荐，已准备）</option>
+            </select>
+            <small class="model-status" id="modelStatusText">状态：未检查</small>
+          </label>
+        </div>
+        <button id="textDetectBtn" class="primary" disabled>开始图像分割</button>
+        <p class="workflow-note">上传图片后输入物体名称，系统会自动找到目标并生成分割区域或检测框。</p>
+        <button type="button" class="secondary advanced-toggle" id="advancedToggleBtn">显示高级工具</button>
+        <p class="advanced-note">高级工具用于批量处理；日常按名称识别不需要展开。</p>
+      </div>
+
+      <div class="panel detection-panel advanced-panel" id="batchPanel">
+        <h3>批量处理 <span class="panel-kicker">SAM3</span></h3>
+
+        <div class="batch-step">
+          <div class="batch-step-title"><span class="batch-step-number">01</span>选择图片</div>
+          <p class="batch-step-help">可选择多张图片，或直接选择一个图片文件夹。</p>
+          <div class="batch-file-actions">
+            <label class="batch-file-btn">＋ 多选图片
+              <input type="file" id="batchInput" accept="image/*" multiple />
+            </label>
+            <label class="batch-file-btn">▦ 选择文件夹
+              <input type="file" id="batchFolderInput" accept="image/*" webkitdirectory directory multiple />
+            </label>
+          </div>
+          <div class="batch-file-summary" id="batchFileSummary">尚未选择图片</div>
+        </div>
+
+        <div class="batch-step">
+          <div class="batch-step-title"><span class="batch-step-number">02</span>设置提示</div>
+          <p class="batch-step-help">文字提示和首图点击/框选可以单独使用，也可以同时使用。</p>
+          <div class="batch-prompt-box">
+            <div class="side-heading" style="margin-top:6px;">目标类别
+              <small>点击「＋ 新建」添加多个目标，例如鸡蛋、西红柿</small>
+            </div>
+            <div class="category-list" id="batchConceptList">
+              <!-- 动态添加的目标类别 -->
+            </div>
+            <div class="category-actions" style="padding:6px 10px 8px;">
+              <button class="icon-action" id="batchAddConceptBtn" title="新建目标类别">＋ 新建</button>
+              <button class="icon-action" id="batchRemoveConceptBtn" title="删除选中类别">− 删除</button>
+            </div>
+            
+            <label class="batch-prompt-label" for="batchContainerConcept">限制区域
+              <small>先识别这个区域，再在区域内找目标；默认限制在锅内</small>
+            </label>
+            <input id="batchContainerConcept" type="text" value="锅" placeholder="例如：锅、盘子、托盘">
+            <div class="batch-prompt-divider">首图点击提示（可选）</div>
+            <div class="batch-prompt-actions">
+              <button type="button" class="mini-btn active" id="batchContainerPromptBtn">① 点击锅区域</button>
+              <button type="button" class="mini-btn" id="batchTargetPromptBtn">② 点击目标区域</button>
+              <button type="button" class="mini-btn" id="batchContainerBoxBtn">③ 框选锅区域</button>
+            </div>
+            <small class="batch-status" id="batchPromptStatus">当前为限制区域提示；点击第一张图中的锅。也可以切换到"框选锅区域"缩小搜索范围。</small>
+          </div>
+          <div class="batch-engine">批量引擎：SAM3 图像模型</div>
+        </div>
+
+        <div class="batch-run">
+          <button id="batchBtn" class="primary" disabled>▶ 开始批量处理</button>
+          <button id="batchExportZipBtn" class="secondary" disabled>📦 导出全部批量实例 ZIP</button>
+        </div>
+      </div>
+
+      <div class="panel detection-panel advanced-panel" id="sam2BatchTrackingPanel">
+        <h3>记忆传播批量 <span class="panel-kicker">SAM2</span></h3>
+        <p class="batch-step-help">上传图像后，输入目标类别（如：番茄,鸡蛋），点击"GPT 智能识别"自动完成所有工作。</p>
+        
+        <div class="side-heading" style="margin-top:6px;">目标类别
+          <small>多个类别用逗号分隔，如：番茄,鸡蛋,牛肉</small>
+        </div>
+        <input id="sam2TargetNames" type="text" placeholder="输入目标类别，如：番茄,鸡蛋" style="width:100%;padding:8px;margin:8px 0;border:1px solid #ddd;border-radius:4px;">
+        
+        <div class="batch-run" style="margin-top:12px;">
+          <button id="sam2GptInitBtn" class="primary" disabled> GPT 智能识别</button>
+        </div>
+
+        <small class="batch-status" id="sam2TrackStatus">请先上传批量图片，然后输入目标类别并点击"GPT 智能识别"。</small>
+        
+        <div class="batch-run" style="margin-top:12px;">
+          <button id="sam2TrackStartBtn" class="primary" disabled>▶ 开始 SAM2 传播</button>
+        </div>
+        <div class="batch-run" style="margin-top:8px;">
+          <button id="sam2ExportJsonBtn" class="secondary" disabled>📄 导出 JSON</button>
+          <button id="sam2ExportZipBtn" class="secondary" disabled> 导出 ZIP</button>
+        </div>
+      </div>
+
+      <div class="panel" id="recognizeLogPanel" style="display:none;">
+        <h3>
+          <span>识别日志</span>
+          <button class="mini-btn" id="clearLogBtn">清空</button>
+        </h3>
+        <pre id="recognizeLog"></pre>
+      </div>
+
+    </aside>
+  </div>
+
+  <div id="roiModal">
+    <div class="modal-body">
+      <h2>
+        <span>🔍 当前 ROI 位置（红框）</span>
+        <button class="close-btn" id="roiModalClose">×</button>
+      </h2>
+      <img id="roiModalImg" alt="ROI preview" />
+      <div class="hint">
+        红框 = <code>AUTO_SEARCH_ROI</code> 当前值。若红框没有覆盖到食物，请在配置模板 xlsx 中修改
+        <code>AUTO_SEARCH_ROI</code>（格式：<code>x1,y1,x2,y2</code>），改完后重新上传。
+      </div>
+    </div>
+  </div>
+
+<script>
+// ============================================================
+const API = (window.location.port === "8080")
+  ? "http://127.0.0.1:8000"
+  : window.location.origin;
+const BOX_DRAG_PX = 6;
+const NEW_HIGHLIGHT_MS = 800;
+
+const canvasOrigin  = document.getElementById("canvasOrigin");
+const canvasOverlay = document.getElementById("canvasOverlay");
+const renderedImgEl = document.getElementById("renderedImg");
+
+const ctxOrigin  = canvasOrigin.getContext("2d");
+const ctxOverlay = canvasOverlay.getContext("2d");
+
+const originInner = document.getElementById("originInner");
+const maskInner   = document.getElementById("maskInner");
+const canvasEmpty  = document.getElementById("canvasEmpty");
+const fileInput    = document.getElementById("fileInput");
+const uploadDropzone = document.querySelector(".upload-dropzone");
+const zoomInBtn = document.getElementById("zoomInBtn");
+const zoomOutBtn = document.getElementById("zoomOutBtn");
+const zoomLabel = document.getElementById("zoomLabel");
+const categoryList = document.getElementById("categoryList");
+const categoryActions = document.querySelectorAll(".category-actions .icon-action");
+
+const originMeta     = document.getElementById("originMeta");
+const maskMeta       = document.getElementById("maskMeta");
+const statusEl       = document.getElementById("status");
+const instanceListEl = document.getElementById("instanceList");
+const countLabel     = document.getElementById("countLabel");
+const modeHelp       = document.getElementById("modeHelp");
+const exportSelBtn   = document.getElementById("exportSelBtn");
+const exportZipBtn   = document.getElementById("exportZipBtn");
+const refreshListBtn = document.getElementById("refreshListBtn");
+const recognizeBtn   = document.getElementById("recognizeBtn");
+const textNamesInput = document.getElementById("textNames");
+const textTask       = document.getElementById("textTask");
+const textConfidence = document.getElementById("textConfidence");
+const worldModel     = document.getElementById("worldModel");
+const modelStatusText = document.getElementById("modelStatusText");
+const textDetectBtn  = document.getElementById("textDetectBtn");
+const sam3ImageName = document.getElementById("sam3ImageName");
+const sam3ImageConfidence = document.getElementById("sam3ImageConfidence");
+const sam3ImageBtn = document.getElementById("sam3ImageBtn");
+const sam3ImageStatus = document.getElementById("sam3ImageStatus");
+const taskSegBtn     = document.getElementById("taskSegBtn");
+const taskDetBtn     = document.getElementById("taskDetBtn");
+const workflowTaskTitle = document.getElementById("workflowTaskTitle");
+const advancedToggleBtn = document.getElementById("advancedToggleBtn");
+const recognizeMode  = document.getElementById("recognizeMode");
+const configFileInput= document.getElementById("configFile");
+const tplBtn         = document.getElementById("tplBtn");
+const debugRoiBtn    = document.getElementById("debugRoiBtn");
+
+const batchInput = document.getElementById("batchInput");
+const batchFolderInput = document.getElementById("batchFolderInput");
+const batchContainerConcept = document.getElementById("batchContainerConcept");
+const batchBtn   = document.getElementById("batchBtn");
+const batchExportZipBtn = document.getElementById("batchExportZipBtn");
+const batchFileSummary = document.getElementById("batchFileSummary");
+const batchPromptStatus = document.getElementById("batchPromptStatus");
+const batchContainerPromptBtn = document.getElementById("batchContainerPromptBtn");
+const batchTargetPromptBtn = document.getElementById("batchTargetPromptBtn");
+const batchContainerBoxBtn = document.getElementById("batchContainerBoxBtn");
+const batchPanel = document.getElementById("batchPanel");
+const batchConceptList = document.getElementById("batchConceptList");
+const batchAddConceptBtn = document.getElementById("batchAddConceptBtn");
+const batchRemoveConceptBtn = document.getElementById("batchRemoveConceptBtn");
+
+// SAM3 批处理概念列表
+let batchConcepts = {};  // {id: {name, color}}
+let batchNextConceptId = 1;
+let batchSelectedConceptId = null;
+const batchConceptColors = ["red", "green", "blue", "orange", "purple", "teal", "pink", "amber", "lime", "indigo", "cyan", "brown"];
+
+// 更新 SAM3 批处理概念列表显示
+function updateBatchConceptList() {
+  if (!batchConceptList) return;
+  const conceptIds = Object.keys(batchConcepts);
+  if (conceptIds.length === 0) {
+    batchConceptList.innerHTML = '<div style="padding:4px 8px;font-size:12px;color:#999;">暂无目标类别，请点击「＋ 新建」添加</div>';
+    batchSelectedConceptId = null;
+    return;
+  }
+  
+  batchConceptList.innerHTML = '';
+  for (const [id, concept] of Object.entries(batchConcepts)) {
+    const numId = parseInt(id);
+    const isSelected = numId === batchSelectedConceptId;
+    const colorClass = concept.color || "red";
+    
+    const item = document.createElement("div");
+    item.className = "category-item" + (isSelected ? " selected" : "");
+    item.dataset.conceptId = id;
+    
+    const dot = document.createElement("i");
+    dot.className = `category-dot ${colorClass}`;
+    
+    const nameInput = document.createElement("input");
+    nameInput.className = "category-name";
+    nameInput.value = concept.name;
+    nameInput.setAttribute("aria-label", "概念名称");
+    nameInput.addEventListener("change", (e) => {
+      batchConcepts[numId].name = e.target.value.trim() || `概念_${numId}`;
+    });
+    nameInput.addEventListener("focus", (e) => {
+      e.stopPropagation();
+    });
+    nameInput.addEventListener("click", (e) => {
+      e.stopPropagation();
+    });
+    
+    item.appendChild(dot);
+    item.appendChild(nameInput);
+    
+    item.addEventListener("click", () => {
+      batchSelectedConceptId = numId;
+      updateBatchConceptList();
+    });
+    
+    batchConceptList.appendChild(item);
+  }
+}
+
+// 新建概念按钮
+batchAddConceptBtn?.addEventListener("click", () => {
+  const newId = batchNextConceptId++;
+  const colorIdx = (Object.keys(batchConcepts).length) % batchConceptColors.length;
+  batchConcepts[newId] = {
+    name: `概念_${newId}`,
+    color: batchConceptColors[colorIdx],
+  };
+  batchSelectedConceptId = newId;
+  updateBatchConceptList();
+});
+
+// 删除概念按钮
+batchRemoveConceptBtn?.addEventListener("click", () => {
+  if (batchSelectedConceptId === null || batchSelectedConceptId === undefined) {
+    return;
+  }
+  delete batchConcepts[batchSelectedConceptId];
+  const remaining = Object.keys(batchConcepts);
+  batchSelectedConceptId = remaining.length ? parseInt(remaining[remaining.length - 1]) : null;
+  updateBatchConceptList();
+});
+
+// 初始化概念列表
+updateBatchConceptList();
+const sam2TrackContainerBtn = document.getElementById("sam2TrackContainerBtn");
+const sam2TrackContainerBoxBtn = document.getElementById("sam2TrackContainerBoxBtn");
+const sam2GptInitBtn = document.getElementById("sam2GptInitBtn");
+const sam2TrackStartBtn = document.getElementById("sam2TrackStartBtn");
+const sam2TrackStatus = document.getElementById("sam2TrackStatus");
+const sam2TargetList = document.getElementById("sam2TargetList");
+const sam2AddTargetCategoryBtn = document.getElementById("sam2AddTargetCategoryBtn");
+const sam2RemoveTargetCategoryBtn = document.getElementById("sam2RemoveTargetCategoryBtn");
+const sam2PositivePointBtn = document.getElementById("sam2PositivePointBtn");
+const sam2NegativePointBtn = document.getElementById("sam2NegativePointBtn");
+const sam2ApplyCorrectionBtn = document.getElementById("sam2ApplyCorrectionBtn");
+const sam2CorrectionStatus = document.getElementById("sam2CorrectionStatus");
+let sam2TrackStage = "container";
+let sam2TrackPrompt = { container: [], target: [] };
+let sam2TrackUploaded = false;
+let sam2TrackPrompted = false;
+let sam2TrackEnabled = false;
+let sam2Targets = {};  // 存储多个目标 {object_id: {name, points, labels}}
+let sam2CorrectionMode = 1;
+let sam2CorrectionEnabled = false;
+let sam2NextTargetId = 2;  // 下一个目标 ID（从 2 开始）
+let sam2SelectedTargetId = null;  // 当前选中的目标类别 ID
+const sam2TargetColors = ["red", "green", "blue", "orange", "purple", "teal", "pink", "amber", "lime", "indigo", "cyan", "brown"];
+let batchPromptStage = "container";
+let batchPromptCaptureEnabled = false;
+let batchPrompt = {
+  containerPoints: [], containerLabels: [], box: null,
+  targetPoints: [], targetLabels: [], ready: false
+};
+let gptPromptDebug = [];
+
+function isBatchPromptCaptureActive() {
+  return batchPromptCaptureEnabled && activeBatchIndex === 0 && batchFiles.length;
+}
+
+function setSam2CorrectionMode(label) {
+  sam2CorrectionMode = label === 0 ? 0 : 1;
+  sam2PositivePointBtn?.classList.toggle("active", sam2CorrectionMode === 1);
+  sam2NegativePointBtn?.classList.toggle("active", sam2CorrectionMode === 0);
+  if (sam2CorrectionStatus) {
+    sam2CorrectionStatus.textContent = sam2CorrectionMode === 1
+      ? "正点模式：点击目标内部的不同分散区域。"
+      : "负点模式：点击其他食材、锅、盘子或背景。";
+  }
+}
+
+function correctionPointCount(target) {
+  return (target?.manual_points?.length || 0);
+}
+
+async function applySam2CorrectionPoint(point) {
+  if (!sam2CorrectionEnabled || !sam2SelectedTargetId) return false;
+  const target = sam2Targets[sam2SelectedTargetId];
+  if (!target) {
+    setStatus("请先选中要修正的目标类别", "error");
+    return true;
+  }
+  if (!sam2TrackUploaded) {
+    setStatus("请先上传批量图片并完成首图初始化", "error");
+    return true;
+  }
+  sam2ApplyCorrectionBtn && (sam2ApplyCorrectionBtn.disabled = true);
+  try {
+    const res = await fetch(`${API}/sam2-batch-tracking/refine`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target_id: Number(sam2SelectedTargetId),
+        points: [[point.x, point.y]],
+        labels: [sam2CorrectionMode],
+        name: target.name,
+      }),
+    });
+    const ret = await res.json();
+    if (ret.status !== "ok") throw new Error(ret.msg || "人工修正失败");
+    target.manual_points = target.manual_points || [];
+    target.manual_labels = target.manual_labels || [];
+    target.manual_points.push([point.x, point.y]);
+    target.manual_labels.push(sam2CorrectionMode);
+    updateSam2TargetList();
+    if (ret.rendered) {
+      setRenderedImage(ret.rendered);
+    } else if (ret.preview) {
+      setRenderedImage(ret.preview);
+    }
+    await syncInstanceList({ silent: true });
+    gptPromptDebug = gptPromptDebug.map(item => {
+      if ((item.name || "") !== target.name) return item;
+      const next = { ...item };
+      next.manual_points = target.manual_points.slice();
+      next.manual_labels = target.manual_labels.slice();
+      return next;
+    });
+    redrawOverlay();
+    if (sam2CorrectionStatus) {
+      sam2CorrectionStatus.textContent =
+        `${target.name} 已应用 ${target.manual_points.length} 个人工修正点；继续点击可补点。`;
+    }
+    setStatus(
+      `${sam2CorrectionMode === 1 ? "正点" : "负点"}已应用到「${target.name}」`,
+      "success",
+    );
+  } catch (err) {
+    setStatus("人工修正失败：" + err.message, "error");
+  } finally {
+    if (sam2ApplyCorrectionBtn) sam2ApplyCorrectionBtn.disabled = false;
+  }
+  return true;
+}
+
+sam2PositivePointBtn?.addEventListener("click", () => setSam2CorrectionMode(1));
+sam2NegativePointBtn?.addEventListener("click", () => setSam2CorrectionMode(0));
+
+const recognizeLogPanel = document.getElementById("recognizeLogPanel");
+const recognizeLogEl    = document.getElementById("recognizeLog");
+const clearLogBtn       = document.getElementById("clearLogBtn");
+
+const roiModal      = document.getElementById("roiModal");
+const roiModalImg   = document.getElementById("roiModalImg");
+const roiModalClose = document.getElementById("roiModalClose");
+
+// 检查器元素
+const inspectorFile       = document.getElementById("inspectorFile");
+const inspectorSize       = document.getElementById("inspectorSize");
+const inspectorCount      = document.getElementById("inspectorCount");
+const inspectorSelected   = document.getElementById("inspectorSelected");
+const inspectorName       = document.getElementById("inspectorName");
+const saveInspectorBtn    = document.getElementById("saveInspectorBtn");
+const inspectorTask       = document.getElementById("inspectorTask");
+const inspectorConfidence = document.getElementById("inspectorConfidence");
+const morphSlider         = document.getElementById("morphSlider");
+const morphValue          = document.getElementById("morphValue");
+const morphResetBtn       = document.getElementById("morphResetBtn");
+const morphCommitBtn      = document.getElementById("morphCommitBtn");
+const topImageMeta        = document.getElementById("topImageMeta");
+const assetFileLabel      = document.getElementById("assetFileLabel");
+const batchAssetList      = document.getElementById("batchAssetList");
+
+// ============================================================
+let originImg = null;
+let originW = 0, originH = 0;
+let displayW = 0, displayH = 0;
+let baseDisplayScale = 1;
+let zoomFactor = 1;
+let activeCategory = "object";
+let workflowTask = "segmentation";
+
+let allInstances = [];
+let selectedId   = null;
+let newIdSet     = new Set();
+let batchFiles = [];
+let activeBatchIndex = -1;
+const batchObjectUrls = new Map();
+let batchResultStatus = new Map();
+let batchId = null;
+
+let mode = "point";
+let isDragging = false;
+let dragStart  = null;
+let dragCur    = null;
+
+let renderToken = 0;
+let morphRequestToken = 0;
+
+// ============================================================
+function setStatus(text, type = "") {
+  statusEl.textContent = text;
+  statusEl.className = "status " + type;
+}
+
+function loadImageFromSrc(src) {
+  return new Promise((resolve, reject) => {
+    const im = new Image();
+    im.onload  = () => resolve(im);
+    im.onerror = () => reject(new Error("图片加载失败"));
+    im.src = src;
+  });
+}
+
+function toImageCoords(clientX, clientY) {
+  const rect = canvasOverlay.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(originW, (clientX - rect.left) / rect.width  * originW)),
+    y: Math.max(0, Math.min(originH, (clientY - rect.top)  / rect.height * originH)),
+  };
+}
+
+function getPromptName() {
+  return activeCategory || "object";
+}
+
+function categoryNames() {
+  return [...categoryList.querySelectorAll(".category-item")]
+    .map(item => item.dataset.category || item.querySelector(".category-name")?.value?.trim())
+    .filter(Boolean);
+}
+
+function ensureCategory(name, select = false) {
+  const cleanName = String(name || "").trim();
+  if (!cleanName || !categoryList) return;
+  const existing = [...categoryList.querySelectorAll(".category-item")]
+    .find(item => (item.dataset.category || "").toLowerCase() === cleanName.toLowerCase());
+  if (existing) {
+    if (select) existing.click();
+    return;
+  }
+  const item = document.createElement("div");
+  item.className = "category-item";
+  item.dataset.category = cleanName;
+  item.innerHTML = `<i class="category-dot blue"></i><input class="category-name" value="" aria-label="类别名称">`;
+  item.querySelector(".category-name").value = cleanName;
+  categoryList.appendChild(item);
+  bindCategoryItem(item);
+  if (select) item.click();
+}
+
+function bindCategoryItem(item) {
+  const input = item.querySelector(".category-name");
+  if (!input) return;
+  input.addEventListener("click", e => e.stopPropagation());
+  input.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      input.blur();
+    }
+  });
+  input.addEventListener("blur", () => {
+    const cleanName = input.value.trim();
+    if (!cleanName) {
+      input.value = item.dataset.category || "object";
+      return;
+    }
+    const duplicate = [...categoryList.querySelectorAll(".category-item")]
+      .some(other => other !== item &&
+        (other.dataset.category || other.querySelector(".category-name")?.value || "").toLowerCase() === cleanName.toLowerCase());
+    if (duplicate) {
+      input.value = item.dataset.category || cleanName;
+      setStatus("类别名称已存在", "error");
+      return;
+    }
+    const oldName = item.dataset.category || "";
+    item.dataset.category = cleanName;
+    input.value = cleanName;
+    if (activeCategory === oldName) activeCategory = cleanName;
+    setStatus(`类别已修改为：${cleanName}`, "success");
+  });
+}
+
+document.querySelectorAll(".category-item").forEach(bindCategoryItem);
+
+function sortInstancesAsc() {
+  allInstances.sort((a, b) => a.id - b.id);
+}
+
+function showPulse(imageX, imageY) {
+  if (displayW === 0 || originW === 0) return;
+  const sx = imageX / originW * displayW;
+  const sy = imageY / originH * displayH;
+  const dot = document.createElement("div");
+  dot.className = "pulse-dot";
+  dot.style.left = sx + "px";
+  dot.style.top  = sy + "px";
+  maskInner.appendChild(dot);
+  setTimeout(() => dot.remove(), 1000);
+}
+
+// ============================================================
+function fitCanvas() {
+  if (!originImg) return;
+  const stageRect = document.querySelector(".stage").getBoundingClientRect();
+  const gapAndPadding = 14 * 2;
+  const panelW = stageRect.width  - gapAndPadding - 2;
+  const panelH = stageRect.height - 14 * 2 - 40;
+
+  baseDisplayScale = Math.min(panelW / originW, panelH / originH, 1);
+  const s = baseDisplayScale * zoomFactor;
+  displayW = Math.max(1, Math.floor(originW * s));
+  displayH = Math.max(1, Math.floor(originH * s));
+
+  originInner.style.width  = displayW + "px";
+  originInner.style.height = displayH + "px";
+  canvasOrigin.width  = originW;
+  canvasOrigin.height = originH;
+  canvasOrigin.style.width  = displayW + "px";
+  canvasOrigin.style.height = displayH + "px";
+
+  maskInner.style.width  = displayW + "px";
+  maskInner.style.height = displayH + "px";
+  canvasOverlay.width  = originW;
+  canvasOverlay.height = originH;
+  canvasOverlay.style.width  = displayW + "px";
+  canvasOverlay.style.height = displayH + "px";
+
+  originMeta.textContent = `${originW} × ${originH}`;
+  zoomLabel.textContent = `${Math.round(zoomFactor * 100)}%`;
+  document.querySelectorAll(".canvas-wrap").forEach(el => {
+    el.classList.toggle("zoomed", zoomFactor > 1.01);
+  });
+}
+
+function setZoom(nextZoom) {
+  zoomFactor = Math.max(0.5, Math.min(3, nextZoom));
+  if (originImg) {
+    fitCanvas();
+    redrawOrigin();
+    redrawOverlay();
+  } else {
+    zoomLabel.textContent = `${Math.round(zoomFactor * 100)}%`;
+  }
+}
+
+function clearAll() {
+  originImg = null;
+  originW = originH = displayW = displayH = 0;
+  allInstances = [];
+  selectedId = null;
+  newIdSet.clear();
+  isDragging = false;
+  dragStart = dragCur = null;
+  gptPromptDebug = [];
+  renderToken++;
+  zoomFactor = 1;
+  exportSelBtn.disabled = true;
+  exportZipBtn.disabled = true;
+  if (batchExportZipBtn) batchExportZipBtn.disabled = true;
+  if (recognizeBtn) recognizeBtn.disabled = true;
+  if (textDetectBtn) textDetectBtn.disabled = true;
+  if (sam3ImageBtn) sam3ImageBtn.disabled = true;
+  if (batchBtn) batchBtn.disabled = batchFiles.length === 0;
+
+  ctxOrigin.clearRect(0, 0, canvasOrigin.width, canvasOrigin.height);
+  ctxOverlay.clearRect(0, 0, canvasOverlay.width, canvasOverlay.height);
+  renderedImgEl.removeAttribute("src");
+  if (canvasEmpty) canvasEmpty.classList.remove("hidden");
+
+  originInner.style.width = originInner.style.height = "";
+  maskInner.style.width   = maskInner.style.height   = "";
+
+  originMeta.textContent = "";
+  maskMeta.textContent   = "全部实例";
+  countLabel.textContent = "";
+
+  instanceListEl.innerHTML = '<div class="empty">暂无实例</div>';
+  if (recognizeLogPanel) recognizeLogPanel.style.display = "none";
+  if (recognizeLogEl)    recognizeLogEl.textContent = "";
+
+  updateInspector();
+}
+
+// ============================================================
+function updateInspector() {
+  inspectorFile.textContent  = originImg ? (assetFileLabel.textContent || "已加载") : "未加载";
+  inspectorSize.textContent  = originW ? `${originW} × ${originH}` : "-";
+  inspectorCount.textContent = allInstances.length;
+
+  topImageMeta.textContent = originW ? `${originW}×${originH}` : "未加载图片";
+
+  if (selectedId == null) {
+    inspectorSelected.textContent = "暂无选择";
+    inspectorName.value = "";
+    inspectorName.disabled = true;
+    saveInspectorBtn.disabled = true;
+    inspectorTask.textContent = "-";
+    inspectorConfidence.textContent = "-";
+    if (morphSlider) {
+      morphSlider.value = "0";
+      morphSlider.disabled = true;
+    }
+    if (morphValue) morphValue.textContent = "0";
+    if (morphResetBtn) morphResetBtn.disabled = true;
+    if (morphCommitBtn) morphCommitBtn.disabled = true;
+  } else {
+    const it = allInstances.find(x => x.id === selectedId);
+    if (it) {
+      inspectorSelected.textContent = `${it.name || "object"} #${it.id}`;
+      inspectorName.value = it.name || "object";
+      inspectorName.disabled = false;
+      saveInspectorBtn.disabled = false;
+      inspectorTask.textContent = it.task || "segmentation";
+      inspectorConfidence.textContent = it.confidence == null ? "手工" : `${(it.confidence * 100).toFixed(1)}%`;
+      if (morphSlider) {
+        morphSlider.value = "0";
+        morphSlider.disabled = false;
+      }
+      if (morphValue) morphValue.textContent = "0";
+      if (morphResetBtn) morphResetBtn.disabled = false;
+      if (morphCommitBtn) morphCommitBtn.disabled = false;
+    } else {
+      inspectorSelected.textContent = "暂无选择";
+      inspectorName.value = "";
+      inspectorName.disabled = true;
+      saveInspectorBtn.disabled = true;
+      inspectorTask.textContent = "-";
+      inspectorConfidence.textContent = "-";
+      if (morphSlider) morphSlider.disabled = true;
+      if (morphResetBtn) morphResetBtn.disabled = true;
+      if (morphCommitBtn) morphCommitBtn.disabled = true;
+    }
+  }
+}
+
+// ============================================================
+function redrawOrigin() {
+  if (!originImg) return;
+  ctxOrigin.globalAlpha = 1;
+  ctxOrigin.clearRect(0, 0, originW, originH);
+  ctxOrigin.drawImage(originImg, 0, 0, originW, originH);
+}
+
+function redrawOverlay() {
+  ctxOverlay.clearRect(0, 0, originW, originH);
+  if (originImg && gptPromptDebug.length) {
+    ctxOverlay.save();
+    ctxOverlay.lineWidth = Math.max(2, originW / 420);
+    ctxOverlay.font = `${Math.max(12, Math.round(originW / 48))}px Arial`;
+    for (const item of gptPromptDebug) {
+      const name = item.name || "target";
+      const box = item.box || null;
+      if (box && box.length === 4) {
+        const x1 = box[0] * originW;
+        const y1 = box[1] * originH;
+        const x2 = box[2] * originW;
+        const y2 = box[3] * originH;
+        ctxOverlay.strokeStyle = "#f6c445";
+        ctxOverlay.setLineDash([10, 7]);
+        ctxOverlay.strokeRect(x1, y1, x2 - x1, y2 - y1);
+        ctxOverlay.setLineDash([]);
+        ctxOverlay.fillStyle = "rgba(246,196,69,0.95)";
+        ctxOverlay.fillText(name, x1 + 4, Math.max(18, y1 - 6));
+      }
+      const drawPoint = (point, color, sign) => {
+        if (!point || point.length < 2) return;
+        const x = point[0] * originW;
+        const y = point[1] * originH;
+        ctxOverlay.beginPath();
+        ctxOverlay.arc(x, y, Math.max(4, originW / 120), 0, Math.PI * 2);
+        ctxOverlay.fillStyle = color;
+        ctxOverlay.fill();
+        ctxOverlay.strokeStyle = "#111";
+        ctxOverlay.lineWidth = Math.max(1, originW / 900);
+        ctxOverlay.stroke();
+        ctxOverlay.fillStyle = "#fff";
+        ctxOverlay.fillText(sign, x + 7, y - 7);
+      };
+      (item.positive_points || []).forEach(point => drawPoint(point, "#22c55e", "+"));
+      (item.negative_points || []).forEach(point => drawPoint(point, "#ef4444", "-"));
+    }
+    for (const target of Object.values(sam2Targets)) {
+      const manualPoints = target.manual_points || [];
+      const manualLabels = target.manual_labels || [];
+      manualPoints.forEach((point, index) => {
+        if (!point || point.length < 2) return;
+        const normalized = [point[0] / Math.max(originW, 1), point[1] / Math.max(originH, 1)];
+        drawPoint(
+          normalized,
+          manualLabels[index] === 0 ? "#ef4444" : "#22c55e",
+          manualLabels[index] === 0 ? "-" : "+",
+        );
+      });
+    }
+    ctxOverlay.restore();
+  }
+  if (isDragging && dragStart && dragCur) {
+    const x1 = Math.min(dragStart.x, dragCur.x);
+    const y1 = Math.min(dragStart.y, dragCur.y);
+    const w  = Math.abs(dragCur.x - dragStart.x);
+    const h  = Math.abs(dragCur.y - dragStart.y);
+
+    ctxOverlay.save();
+    ctxOverlay.strokeStyle = "#1976d2";
+    ctxOverlay.lineWidth   = Math.max(2, originW / 500);
+    ctxOverlay.setLineDash([8, 6]);
+    ctxOverlay.strokeRect(x1, y1, w, h);
+    ctxOverlay.fillStyle = "rgba(25,118,210,0.12)";
+    ctxOverlay.fillRect(x1, y1, w, h);
+    ctxOverlay.restore();
+  }
+}
+
+function setRenderedImage(b64) {
+  if (!b64) return;
+  renderedImgEl.classList.add("fading");
+  const url = "data:image/jpeg;base64," + b64;
+  const tmp = new Image();
+  tmp.onload = () => {
+    renderedImgEl.src = url;
+    requestAnimationFrame(() => {
+      renderedImgEl.classList.remove("fading");
+    });
+  };
+  tmp.onerror = () => renderedImgEl.classList.remove("fading");
+  tmp.src = url;
+}
+
+async function refreshRendered(highlight) {
+  const token = ++renderToken;
+  let url;
+  if (highlight == null) url = `${API}/render`;
+  else                   url = `${API}/render?highlight=${encodeURIComponent(highlight)}`;
+
+  let res;
+  try { res = await fetch(url); }
+  catch (err) {
+    console.error("[render] 网络错误:", err);
+    setStatus("无法连接到后端", "error");
+    return;
+  }
+  if (!res.ok) {
+    setStatus(`渲染失败 HTTP ${res.status}`, "error");
+    return;
+  }
+  const data = await res.json().catch(() => null);
+  if (!data) return;
+  if (data.error) {
+    setStatus("渲染错误：" + data.error, "error");
+    return;
+  }
+  if (token !== renderToken) return;
+  if (!data.image) return;
+  setRenderedImage(data.image);
+}
+
+// ============================================================
+async function syncInstanceList({ silent = false } = {}) {
+  let res;
+  try { res = await fetch(API + "/masks"); }
+  catch (err) {
+    if (!silent) setStatus("刷新列表失败", "error");
+    return false;
+  }
+  if (!res.ok) return false;
+  const data = await res.json();
+  const list = data.masks || [];
+  allInstances = list.map(x => ({
+    id:     x.id,
+    color:  x.color,
+    amg:    x.amg,
+    source: x.source || (x.amg ? "amg" : "prompt"),
+    name: x.name || "object",
+    confidence: x.confidence,
+    task: x.task || "segmentation",
+    area:   x.area,
+  }));
+  sortInstancesAsc();
+
+  if (selectedId != null && !allInstances.some(x => x.id === selectedId)) {
+    selectedId = null;
+    maskMeta.textContent = "全部实例";
+    exportSelBtn.disabled = true;
+  }
+  renderList();
+  updateInspector();
+  if (!silent) setStatus(`已刷新列表：共 ${allInstances.length} 个实例`, "success");
+  return true;
+}
+
+function tagInfo(item) {
+  const src = item.source || "amg";
+  if (newIdSet.has(item.id)) return { text: "NEW", cls: "new" };
+  if (src === "color_fine") return { text: "color_fine", cls: "tag-color_fine" };
+  if (src === "auto_fine")  return { text: "auto_fine",  cls: "tag-auto_fine" };
+  if (src === "auto")       return { text: "auto",       cls: "tag-auto" };
+  if (src === "pile")       return { text: "PILE",       cls: "tag-pile" };
+  if (item.amg)             return { text: "AMG",        cls: "tag-amg" };
+  return { text: "PROMPT", cls: "tag-prompt" };
+}
+
+function renderList() {
+  instanceListEl.innerHTML = "";
+  countLabel.textContent = allInstances.length ? `(${allInstances.length})` : "";
+
+  const allRow = document.createElement("div");
+  allRow.className = "instance-item" + (selectedId === null ? " active" : "");
+  allRow.dataset.id = "all";
+
+  const allDot = document.createElement("span");
+  allDot.className = "color-dot";
+  allDot.style.background =
+    "conic-gradient(#ff5454, #54b2ff, #7cdc7c, #ffc454, #c47cff, #54dcdc, #ff5454)";
+
+  const allLabel = document.createElement("span");
+  allLabel.className = "instance-id";
+  allLabel.textContent = "全部实例";
+
+  const allTag = document.createElement("span");
+  allTag.className = "instance-tag";
+  allTag.textContent = allInstances.length;
+
+  allRow.appendChild(allDot);
+  allRow.appendChild(allLabel);
+  allRow.appendChild(allTag);
+
+  allRow.onclick = async () => {
+    selectedId = null;
+    maskMeta.textContent = "全部实例";
+    exportSelBtn.disabled = true;
+    renderList();
+    updateInspector();
+    await refreshRendered(null);
+    setStatus(`已切换为显示全部 ${allInstances.length} 个实例`);
+  };
+  instanceListEl.appendChild(allRow);
+
+  if (allInstances.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "暂无实例";
+    instanceListEl.appendChild(empty);
+    return;
+  }
+
+  allInstances.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "instance-item" + (item.id === selectedId ? " active" : "");
+    row.dataset.id = item.id;
+
+    const dot = document.createElement("span");
+    dot.className = "color-dot";
+    dot.style.background = `rgb(${item.color[0]}, ${item.color[1]}, ${item.color[2]})`;
+
+    const label = document.createElement("span");
+    label.className = "instance-id";
+    label.textContent = `${item.name || "object"} #${item.id}`;
+
+    const confidence = document.createElement("span");
+    confidence.className = "instance-confidence";
+    confidence.textContent = item.confidence == null ? "手工" : `${(item.confidence * 100).toFixed(1)}%`;
+
+    const ti = tagInfo(item);
+    const tag = document.createElement("span");
+    tag.className = "instance-tag " + ti.cls;
+    tag.textContent = ti.text;
+
+    const del = document.createElement("button");
+    del.className = "instance-del";
+    del.textContent = "×";
+    del.title = "删除";
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      try {
+        const res = await fetch(API + "/delete_instance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: item.id }),
+        });
+        const ret = await res.json();
+        allInstances = allInstances.filter(x => x.id !== item.id);
+        newIdSet.delete(item.id);
+        if (selectedId === item.id) {
+          selectedId = null;
+          exportSelBtn.disabled = true;
+        }
+        renderList();
+        updateInspector();
+        if (ret.rendered) setRenderedImage(ret.rendered);
+        else await refreshRendered(selectedId);
+        setStatus("已删除实例 " + item.id);
+      } catch (err) {
+        setStatus("删除失败：" + err.message, "error");
+      }
+    };
+
+    row.appendChild(dot);
+    row.appendChild(label);
+    row.appendChild(confidence);
+    row.appendChild(tag);
+    row.appendChild(del);
+
+    row.onclick = async () => {
+      selectedId = item.id;
+      maskMeta.textContent = "实例 " + item.id;
+      exportSelBtn.disabled = false;
+      try {
+        await fetch(API + "/select_instance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: selectedId }),
+        });
+      } catch (err) {}
+      renderList();
+      updateInspector();
+      await refreshRendered(selectedId);
+      setStatus("已选中实例 " + selectedId);
+    };
+
+    instanceListEl.appendChild(row);
+  });
+}
+
+function scrollToInstance(id) {
+  const row = instanceListEl.querySelector(`.instance-item[data-id="${id}"]`);
+  if (row) row.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+// ============================================================
+async function loadOrigin() {
+  const res  = await fetch(API + "/image");
+  const data = await res.json();
+  if (!data.image) {
+    setStatus("后端没有返回原图", "error");
+    return false;
+  }
+  originImg = await loadImageFromSrc("data:image/jpeg;base64," + data.image);
+  originW = originImg.width;
+  originH = originImg.height;
+  if (canvasEmpty) canvasEmpty.classList.add("hidden");
+  fitCanvas();
+  redrawOrigin();
+  updateInspector();
+  return true;
+}
+
+async function loadAllMasks() {
+  await syncInstanceList({ silent: true });
+  selectedId = null;
+  maskMeta.textContent = "全部实例";
+  exportSelBtn.disabled = true;
+  renderList();
+  updateInspector();
+  await refreshRendered(null);
+
+  exportZipBtn.disabled = allInstances.length === 0;
+  if (recognizeBtn) recognizeBtn.disabled = originImg == null;
+  if (textDetectBtn) textDetectBtn.disabled = originImg == null;
+  if (sam3ImageBtn) sam3ImageBtn.disabled = originImg == null;
+  if (batchBtn)     batchBtn.disabled = batchFiles.length === 0;
+}
+
+async function applyNewInstance(ret) {
+  const iid = ret.id;
+  newIdSet.add(iid);
+
+  allInstances = allInstances.filter(x => x.id !== iid);
+  allInstances.push({
+    id:     iid,
+    color:  ret.color || [255, 255, 255],
+    amg:    ret.amg || false,
+    source: ret.source || "prompt",
+    name: ret.name || "object",
+    confidence: ret.confidence,
+    task: ret.task || "segmentation",
+    area:   ret.area || 0,
+  });
+  ensureCategory(ret.name || activeCategory || "object");
+  sortInstancesAsc();
+
+  if (ret.rendered) setRenderedImage(ret.rendered);
+
+  selectedId = iid;
+  maskMeta.textContent = "实例 " + iid;
+  exportSelBtn.disabled = false;
+
+  renderList();
+  updateInspector();
+  scrollToInstance(iid);
+
+  const myToken = ++renderToken;
+  setTimeout(async () => {
+    if (myToken !== renderToken) return;
+    await refreshRendered(selectedId === null ? null : selectedId);
+  }, NEW_HIGHLIGHT_MS);
+}
+
+async function tryPickInstance(p) {
+  try {
+    const res = await fetch(API + "/hit_test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ x: p.x, y: p.y, label: 1 }),
+    });
+    const ret = await res.json();
+    if (ret.status === "ok" && ret.hit != null) return ret.hit;
+    return null;
+  } catch (err) {
+    return null;
+  }
+}
+
+// ============================================================
+// 刷新
+// ============================================================
+refreshListBtn.onclick = async () => {
+  refreshListBtn.classList.add("spinning");
+  refreshListBtn.disabled = true;
+  try {
+    await syncInstanceList({ silent: true });
+    await refreshRendered(selectedId);
+    setStatus(`已刷新列表：${allInstances.length} 个实例`, "success");
+  } finally {
+    refreshListBtn.classList.remove("spinning");
+    refreshListBtn.disabled = false;
+  }
+};
+
+async function saveSelectedInstanceName() {
+  if (selectedId == null) return;
+  const name = inspectorName.value.trim();
+  if (!name) {
+    setStatus("实例名称不能为空", "error");
+    return;
+  }
+  saveInspectorBtn.disabled = true;
+  try {
+    const res = await fetch(API + "/update_instance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: selectedId, name }),
+    });
+    const ret = await res.json();
+    if (!res.ok || ret.status !== "ok") throw new Error(ret.msg || `HTTP ${res.status}`);
+    const item = allInstances.find(x => x.id === selectedId);
+    if (item) item.name = ret.name || name;
+    ensureCategory(ret.name || name);
+    renderList();
+    updateInspector();
+    if (ret.rendered) setRenderedImage(ret.rendered);
+    setStatus(`实例 ${selectedId} 名称已更新为：${ret.name || name}`, "success");
+  } catch (err) {
+    setStatus("保存实例名称失败：" + err.message, "error");
+  } finally {
+    saveInspectorBtn.disabled = false;
+  }
+}
+
+saveInspectorBtn?.addEventListener("click", saveSelectedInstanceName);
+inspectorName?.addEventListener("keydown", e => {
+  if (e.key === "Enter") saveSelectedInstanceName();
+});
+
+async function requestMorph(amount, options = {}) {
+  if (selectedId == null) return;
+  const token = ++morphRequestToken;
+  const { commit = false, reset = false } = options;
+  try {
+    const res = await fetch(API + "/morph_instance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: selectedId, amount, commit, reset }),
+    });
+    const ret = await res.json();
+    if (!res.ok || ret.status !== "ok") {
+      throw new Error(ret.msg || `HTTP ${res.status}`);
+    }
+    if (token !== morphRequestToken) return;
+    if (morphValue) morphValue.textContent = String(reset ? 0 : amount);
+    if (ret.rendered) setRenderedImage(ret.rendered);
+    if (commit || reset) {
+      await syncInstanceList({ silent: true });
+      selectedId = ret.id;
+      renderList();
+      updateInspector();
+      await refreshRendered(selectedId);
+    }
+  } catch (err) {
+    setStatus("实例边缘调整失败：" + err.message, "error");
+  }
+}
+
+morphSlider?.addEventListener("input", () => {
+  if (selectedId == null) return;
+  const amount = Number(morphSlider.value) || 0;
+  if (morphValue) morphValue.textContent = String(amount);
+  requestMorph(amount);
+});
+morphResetBtn?.addEventListener("click", async () => {
+  if (morphSlider) morphSlider.value = "0";
+  await requestMorph(0, { reset: true });
+  setStatus("已恢复当前实例原始边缘", "success");
+});
+morphCommitBtn?.addEventListener("click", async () => {
+  const amount = Number(morphSlider?.value || 0);
+  await requestMorph(amount, { commit: true });
+  setStatus("实例边缘微调已应用", "success");
+});
+
+// ============================================================
+// 识别日志显示
+// ============================================================
+function showRecognizeLog(text, isError = false) {
+  if (!text) return;
+  if (!recognizeLogPanel || !recognizeLogEl) return;
+  recognizeLogPanel.style.display = "";
+  recognizeLogEl.textContent = text;
+  recognizeLogEl.style.color = isError ? "#ffb3b3" : "#d4d4d4";
+  recognizeLogEl.scrollTop = recognizeLogEl.scrollHeight;
+}
+
+function appendRecognizeLog(text, isError = false) {
+  if (!text) return;
+  if (!recognizeLogPanel || !recognizeLogEl) return;
+  recognizeLogPanel.style.display = "";
+  recognizeLogEl.textContent = recognizeLogEl.textContent
+    ? `${recognizeLogEl.textContent}\n${text}`
+    : text;
+  recognizeLogEl.style.color = isError ? "#ffb3b3" : "#d4d4d4";
+  recognizeLogEl.scrollTop = recognizeLogEl.scrollHeight;
+}
+
+if (clearLogBtn) {
+  clearLogBtn.onclick = () => {
+    if (recognizeLogEl) recognizeLogEl.textContent = "";
+    if (recognizeLogPanel) recognizeLogPanel.style.display = "none";
+  };
+}
+
+// ============================================================
+// 查看 ROI 位置
+// ============================================================
+if (debugRoiBtn) {
+  debugRoiBtn.onclick = async () => {
+    if (!originImg) {
+      setStatus("请先上传图片", "error");
+      return;
+    }
+
+    setStatus("正在获取 ROI 预览...");
+    debugRoiBtn.disabled = true;
+
+    try {
+      const res = await fetch(API + "/debug_roi");
+      if (!res.ok) {
+        setStatus(`获取 ROI 预览失败 HTTP ${res.status}`, "error");
+        return;
+      }
+      const data = await res.json();
+      if (data.status === "error" || !data.image) {
+        setStatus("获取 ROI 预览失败：" + (data.msg || "无数据"), "error");
+        return;
+      }
+
+      roiModalImg.src = "data:image/jpeg;base64," + data.image;
+      roiModal.classList.add("show");
+      setStatus("ROI 预览已打开（红框 = AUTO_SEARCH_ROI 当前值）", "success");
+    } catch (err) {
+      setStatus("请求失败：" + err.message, "error");
+    } finally {
+      debugRoiBtn.disabled = false;
+    }
+  };
+}
+
+if (roiModalClose) {
+  roiModalClose.onclick = () => {
+    roiModal.classList.remove("show");
+    roiModalImg.removeAttribute("src");
+  };
+}
+
+if (roiModal) {
+  roiModal.onclick = (e) => {
+    if (e.target === roiModal) {
+      roiModal.classList.remove("show");
+      roiModalImg.removeAttribute("src");
+    }
+  };
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && roiModal && roiModal.classList.contains("show")) {
+    roiModal.classList.remove("show");
+    roiModalImg.removeAttribute("src");
+  }
+});
+
+// ============================================================
+// 识别模式
+// ============================================================
+if (recognizeBtn) {
+  recognizeBtn.onclick = async () => {
+    if (!originImg) {
+      setStatus("请先上传图片", "error");
+      return;
+    }
+    const modeVal = recognizeMode.value;
+    const cfgFile = configFileInput.files[0];
+
+    setStatus(`正在运行识别模式 [${modeVal}]...`);
+    recognizeBtn.disabled = true;
+
+    showRecognizeLog(`[请求] 模式=${modeVal}，正在等待后端响应...\n`);
+
+    const fd = new FormData();
+    if (cfgFile) fd.append("config_file", cfgFile);
+
+    try {
+      const res = await fetch(`${API}/recognize?mode=${encodeURIComponent(modeVal)}`, {
+        method: "POST",
+        body: fd,
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        setStatus(`识别失败 HTTP ${res.status}`, "error");
+        showRecognizeLog(`[HTTP ${res.status}]\n${text}`, true);
+        return;
+      }
+
+      const ret = await res.json();
+      console.log("[recognize] 后端返回:", ret);
+
+      if (ret.log) {
+        showRecognizeLog(ret.log, ret.status !== "ok");
+      }
+
+      if (ret.status !== "ok") {
+        const fullMsg = ret.msg || "识别失败";
+        setStatus("识别失败：" + fullMsg.split("\n")[0], "error");
+        if (ret.msg && ret.log) {
+          showRecognizeLog(ret.log + "\n\n【失败原因】\n" + ret.msg, true);
+        } else if (ret.msg) {
+          showRecognizeLog(ret.msg, true);
+        }
+        return;
+      }
+
+      await applyNewInstance(ret);
+      setStatus(`识别完成，结果已加入实例 ${ret.id}（模式: ${ret.source}）`, "success");
+      exportZipBtn.disabled = false;
+    } catch (err) {
+      setStatus("识别请求失败：" + err.message, "error");
+      showRecognizeLog(`[网络错误]\n${err.message}\n\n请检查后端是否在运行：\n${API}`, true);
+    } finally {
+      recognizeBtn.disabled = false;
+    }
+  };
+}
+
+if (textDetectBtn) {
+  textDetectBtn.onclick = async () => {
+    if (!originImg) {
+      setStatus("请先上传图片", "error");
+      return;
+    }
+    const names = textNamesInput.value.split(/[;,，、]/).map(x => x.trim()).filter(Boolean);
+    if (!names.length) {
+      setStatus("请输入至少一个类别名称", "error");
+      return;
+    }
+    textDetectBtn.disabled = true;
+    setStatus("正在准备 YOLO-World 模型并执行图像" +
+      (textTask.value === "detection" ? "检测..." : "分割..."));
+    const modelPoll = setInterval(async () => {
+      try {
+        const statusRes = await fetch(`${API}/model_status?model=${encodeURIComponent(worldModel.value)}`);
+        const status = await statusRes.json();
+        if (modelStatusText && status.model === worldModel.value) {
+          const label = status.phase === "ready" ? "已就绪"
+            : status.phase === "cached" ? "已缓存"
+            : status.phase === "loading" ? "加载/下载中"
+            : status.phase === "error" ? "加载失败" : "未加载";
+          modelStatusText.textContent = `状态：${label}`;
+        }
+        if (status.phase === "loading") {
+          setStatus("正在加载 YOLO-World 模型，首次使用可能需要下载...");
+        }
+      } catch (_) {}
+    }, 700);
+    try {
+      const res = await fetch(API + "/detect_text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          names,
+          task: textTask.value,
+          confidence: parseFloat(textConfidence.value) || 0.25,
+          model: worldModel.value,
+        }),
+      });
+      const ret = await res.json().catch(() => ({ status: "error", msg: "后端返回了无效响应" }));
+      if (!res.ok || ret.status !== "ok") throw new Error(ret.msg || `HTTP ${res.status}`);
+      for (const item of ret.instances || []) await applyNewInstance(item);
+      await syncInstanceList({ silent: true });
+      if (ret.rendered) setRenderedImage(ret.rendered);
+      exportZipBtn.disabled = allInstances.length === 0;
+      if ((ret.count || 0) === 0) {
+        setStatus("未找到目标：请换一个更具体的名称，或降低置信度", "error");
+      } else {
+        setStatus(`图像${textTask.value === "detection" ? "检测" : "分割"}完成：找到 ${ret.count} 个目标`, "success");
+      }
+    } catch (err) {
+      setStatus("文本自动标注失败：" + err.message, "error");
+    } finally {
+      clearInterval(modelPoll);
+      textDetectBtn.disabled = false;
+    }
+  };
+}
+
+if (sam3ImageBtn) {
+  sam3ImageBtn.onclick = async () => {
+    if (!originImg) return setStatus("请先上传图片", "error");
+    const name = sam3ImageName.value.trim();
+    if (!name) return setStatus("请输入 SAM3 概念名称", "error");
+    sam3ImageBtn.disabled = true;
+    sam3ImageStatus.textContent = "状态：SAM3 本地权重加载/推理中";
+    setStatus("正在使用 SAM3 进行图像概念分割...");
+    try {
+      const res = await fetch(API + "/sam3_image_prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          confidence: parseFloat(sam3ImageConfidence.value) || 0.35,
+        }),
+      });
+      const ret = await res.json().catch(() => ({ status: "error", msg: "后端返回无效响应" }));
+      if (!res.ok || ret.status !== "ok") throw new Error(ret.msg || `HTTP ${res.status}`);
+      for (const item of ret.instances || []) await applyNewInstance(item);
+      await syncInstanceList({ silent: true });
+      if (ret.rendered) setRenderedImage(ret.rendered);
+      sam3ImageStatus.textContent = ret.count ? `状态：已生成 ${ret.count} 个实例` : "状态：未找到目标";
+      setStatus(ret.count ? `SAM3 图像提示完成：找到 ${ret.count} 个「${name}」` : `SAM3 未找到「${name}」`, ret.count ? "success" : "error");
+      exportZipBtn.disabled = allInstances.length === 0;
+    } catch (err) {
+      sam3ImageStatus.textContent = "状态：加载失败";
+      setStatus("SAM3 图像提示失败：" + err.message, "error");
+    } finally {
+      sam3ImageBtn.disabled = !originImg;
+    }
+  };
+}
+
+async function refreshModelStatus() {
+  if (!modelStatusText || !worldModel) return;
+  try {
+    const res = await fetch(`${API}/model_status?model=${encodeURIComponent(worldModel.value)}`);
+    const status = await res.json();
+    const label = status.phase === "ready" ? "已就绪"
+      : status.phase === "cached" ? "已缓存"
+      : status.phase === "loading" ? "加载/下载中"
+      : status.phase === "error" ? "加载失败" : "未下载";
+    modelStatusText.textContent = `状态：${label}`;
+    modelStatusText.title = status.message || "";
+  } catch (_) {
+    modelStatusText.textContent = "状态：后端未连接";
+  }
+}
+
+worldModel?.addEventListener("change", refreshModelStatus);
+refreshModelStatus();
+
+if (tplBtn) {
+  tplBtn.onclick = async () => {
+    try {
+      const res = await fetch(API + "/config_template");
+      const data = await res.json();
+      if (!data.base64) {
+        setStatus("模板获取失败", "error");
+        return;
+      }
+      const byteChars = atob(data.base64);
+      const byteNums = new Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) {
+        byteNums[i] = byteChars.charCodeAt(i);
+      }
+      const blob = new Blob([new Uint8Array(byteNums)],
+        { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.filename || "配置模板.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setStatus("配置模板已下载", "success");
+    } catch (err) {
+      setStatus("下载失败：" + err.message, "error");
+    }
+  };
+}
+
+// 📚 批量识别
+// ============================================================
+if (batchInput) {
+  batchInput.onchange = () => {
+    setBatchFiles([...batchInput.files], true);
+  };
+}
+
+if (batchFolderInput) {
+  batchFolderInput.onchange = () => {
+    setBatchFiles([...batchFolderInput.files], true);
+  };
+}
+
+function setSam2TrackStage(stage) {
+  sam2TrackStage = stage === "target" ? "target" : "container";
+  sam2TrackContainerBtn?.classList.toggle("active", sam2TrackStage === "container");
+  sam2TrackContainerBoxBtn?.classList.remove("active");
+  if (sam2TrackStatus) {
+    sam2TrackStatus.textContent = sam2TrackStage === "target"
+      ? "当前为目标提示：选中一个目标类别，然后点击画布。"
+      : "当前为限制区域提示：点击第一张图中的锅。";
+  }
+  // 设置模式
+  if (sam2TrackStage === "container") setMode("point");
+}
+sam2TrackContainerBtn?.addEventListener("click", () => {
+  sam2TrackEnabled = true;
+  batchPromptCaptureEnabled = false;
+  setSam2TrackStage("container");
+});
+
+// 新建目标类别按钮
+sam2AddTargetCategoryBtn?.addEventListener("click", () => {
+  sam2TrackEnabled = true;
+  batchPromptCaptureEnabled = false;
+  // 创建新的目标类别
+  const newId = sam2NextTargetId++;
+  const colorIdx = (Object.keys(sam2Targets).length) % sam2TargetColors.length;
+  sam2Targets[newId] = {
+    name: `目标_${newId}`,
+    color: sam2TargetColors[colorIdx],
+    points: [],
+    labels: [],
+  };
+  sam2SelectedTargetId = newId;
+  setSam2TrackStage("target");
+  updateSam2TargetList();
+  if (sam2TrackStatus) {
+    sam2TrackStatus.textContent = `已新建目标类别，请编辑名称后点击画布添加提示点。`;
+  }
+});
+
+// 删除目标类别按钮
+sam2RemoveTargetCategoryBtn?.addEventListener("click", () => {
+  if (sam2SelectedTargetId === null || sam2SelectedTargetId === undefined) {
+    if (sam2TrackStatus) sam2TrackStatus.textContent = "请先选中一个目标类别再删除。";
+    return;
+  }
+  delete sam2Targets[sam2SelectedTargetId];
+  const remaining = Object.keys(sam2Targets);
+  sam2SelectedTargetId = remaining.length ? parseInt(remaining[remaining.length - 1]) : null;
+  updateSam2TargetList();
+  if (sam2TrackStatus) {
+    sam2TrackStatus.textContent = sam2SelectedTargetId
+      ? `已删除。当前选中目标 ID=${sam2SelectedTargetId}。`
+      : "已删除所有目标类别，请点击「＋ 新建」添加。";
+  }
+});
+
+// 更新目标列表显示（类别列表样式）
+function updateSam2TargetList() {
+  if (!sam2TargetList) return;
+  const targetIds = Object.keys(sam2Targets);
+  if (targetIds.length === 0) {
+    sam2TargetList.innerHTML = '<div style="padding:4px 8px;font-size:12px;color:#999;">暂无目标类别，请点击「＋ 新建」添加</div>';
+    sam2SelectedTargetId = null;
+    return;
+  }
+  
+  sam2TargetList.innerHTML = '';
+  for (const [objectId, target] of Object.entries(sam2Targets)) {
+    const id = parseInt(objectId);
+    const isSelected = id === sam2SelectedTargetId;
+    const colorClass = target.color || "red";
+    const pointCount = (target.points ? target.points.length : 0)
+      + correctionPointCount(target);
+    
+    const item = document.createElement("div");
+    item.className = "category-item" + (isSelected ? " selected" : "");
+    item.dataset.objectId = objectId;
+    
+    const dot = document.createElement("i");
+    dot.className = `category-dot ${colorClass}`;
+    
+    const nameInput = document.createElement("input");
+    nameInput.className = "category-name";
+    nameInput.value = target.name;
+    nameInput.setAttribute("aria-label", "目标名称");
+    nameInput.addEventListener("change", (e) => {
+      sam2Targets[id].name = e.target.value.trim() || `目标_${id}`;
+    });
+    nameInput.addEventListener("focus", (e) => {
+      e.stopPropagation();
+    });
+    nameInput.addEventListener("click", (e) => {
+      e.stopPropagation();
+    });
+    
+    const badge = document.createElement("span");
+    badge.style.cssText = "font-size:11px;color:#999;flex-shrink:0;";
+    badge.textContent = pointCount > 0 ? `${pointCount}点` : "";
+    
+    item.appendChild(dot);
+    item.appendChild(nameInput);
+    item.appendChild(badge);
+    
+    item.addEventListener("click", () => {
+      sam2SelectedTargetId = id;
+      sam2TrackEnabled = true;
+      sam2CorrectionEnabled = sam2TrackPrompted;
+      batchPromptCaptureEnabled = false;
+      setSam2TrackStage("target");
+      updateSam2TargetList();
+      if (sam2TrackStatus) {
+        sam2TrackStatus.textContent = `已选中目标「${target.name}」(ID=${id})，点击画布添加提示点。`;
+      }
+    });
+    
+    sam2TargetList.appendChild(item);
+  }
+}
+
+// 框选锅按钮
+document.getElementById("sam2TrackContainerBoxBtn")?.addEventListener("click", () => {
+  sam2TrackEnabled = true;
+  sam2TrackStage = "container";
+  batchPromptCaptureEnabled = false;
+  sam2TrackContainerBtn?.classList.remove("active");
+  document.getElementById("sam2TrackContainerBoxBtn")?.classList.add("active");
+  setMode("box");
+  if (sam2TrackStatus) {
+    sam2TrackStatus.textContent = "当前为框选限制区域：在第一张图上拖拽框住锅。";
+  }
+});
+
+async function uploadSam2TrackingBatch() {
+  const fd = new FormData();
+  for (const file of batchFiles) {
+    fd.append("files", file, file.webkitRelativePath || file.name);
+  }
+  const res = await fetch(`${API}/sam2-batch-tracking/upload`, { method: "POST", body: fd });
+  const ret = await res.json();
+  if (ret.status !== "ok") throw new Error(ret.msg || "SAM2 批量上传失败");
+  sam2TrackUploaded = true;
+  
+  // 显示缓存信息
+  if (ret.has_cached_clicks && ret.cached_clicks) {
+    const cache = ret.cached_clicks;
+    let containerInfo = '无';
+    if (cache.container_box) {
+      containerInfo = `框选 [${cache.container_box.map(v => v.toFixed(0)).join(',')}]`;
+    } else if (cache.container_points && cache.container_points.length) {
+      containerInfo = `${cache.container_points.length} 个点击点`;
+    }
+    
+    // 计算目标数量
+    const targets = cache.targets || {};
+    const targetCount = Object.keys(targets).length;
+    const targetInfo = targetCount > 0 ? `${targetCount} 个目标` : '无';
+    
+    setStatus(`发现缓存的点击点：限制区域=${containerInfo}，目标=${targetInfo}。点击"应用缓存"按钮可自动复用。`, "success");
+    
+    // 显示应用缓存按钮（如果存在）
+    const applyCacheBtn = document.getElementById("sam2-apply-cache-btn");
+    if (applyCacheBtn) {
+      applyCacheBtn.style.display = "block";
+      applyCacheBtn.onclick = async () => {
+        try {
+          setStatus("正在应用缓存的点击点...");
+          // 应用限制区域
+          if (cache.container_box) {
+            const res = await fetch(`${API}/sam2-batch-tracking/prompt`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                stage: "container",
+                points: [],
+                labels: [],
+                box: cache.container_box,
+              }),
+            });
+            const ret = await res.json();
+            if (ret.status !== "ok") throw new Error(ret.msg);
+            sam2TrackStatus.textContent = ret.message;
+          } else if (cache.container_points && cache.container_points.length) {
+            const res = await fetch(`${API}/sam2-batch-tracking/prompt`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                stage: "container",
+                points: cache.container_points,
+                labels: cache.container_labels,
+              }),
+            });
+            const ret = await res.json();
+            if (ret.status !== "ok") throw new Error(ret.msg);
+            sam2TrackStatus.textContent = ret.message;
+          }
+          
+          // 应用所有目标点击
+          if (cache.targets && Object.keys(cache.targets).length > 0) {
+            for (const [objectId, target] of Object.entries(cache.targets)) {
+              const res = await fetch(`${API}/sam2-batch-tracking/prompt`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  stage: "target",
+                  points: target.points,
+                  labels: target.labels,
+                  name: target.name,
+                  target_id: parseInt(objectId),
+                }),
+              });
+              const ret = await res.json();
+              if (ret.status !== "ok") throw new Error(ret.msg);
+              
+              // 保存目标信息到前端
+              const colorIdx = (Object.keys(sam2Targets).length) % sam2TargetColors.length;
+              sam2Targets[parseInt(objectId)] = {
+                name: target.name,
+                color: sam2TargetColors[colorIdx],
+                points: target.points,
+                labels: target.labels,
+              };
+            }
+            sam2NextTargetId = Math.max(...Object.keys(cache.targets).map(k => parseInt(k))) + 1;
+            updateSam2TargetList();
+            sam2TrackStatus.textContent = `已应用 ${Object.keys(cache.targets).length} 个目标的缓存点击点`;
+            sam2TrackPrompted = true;
+            sam2TrackStartBtn.disabled = false;
+          }
+          
+          setStatus("缓存点击点已应用，可以开始 SAM2 传播", "success");
+          applyCacheBtn.style.display = "none";
+        } catch (err) {
+          setStatus("应用缓存失败：" + err.message, "error");
+        }
+      };
+    }
+  }
+  
+  return ret;
+}
+
+sam2GptInitBtn?.addEventListener("click", async () => {
+  if (!batchFiles.length) {
+    setStatus("请先选择批量图片", "error");
+    return;
+  }
+  // 从新的输入框获取目标类别
+  const targetInput = document.getElementById("sam2TargetNames");
+  const targetNames = targetInput?.value.split(/[,，]/).map(n => n.trim()).filter(n => n) || [];
+  if (!targetNames.length) {
+    setStatus("请输入目标类别，如：番茄,鸡蛋", "error");
+    return;
+  }
+  const containerConcept = batchContainerConcept?.value.trim() || "";
+  try {
+    sam2GptInitBtn.disabled = true;
+    sam2TrackStartBtn.disabled = true;
+    if (!sam2TrackUploaded) {
+      setStatus("正在准备首图和后续图片序列...");
+      await uploadSam2TrackingBatch();
+    }
+    setStatus(`GPT 正在分析首图中的 ${targetNames.join("、")}...`);
+    showRecognizeLog(`[GPT] 正在分析首图：${targetNames.join("、")}\n`);
+    const res = await fetch(`${API}/sam2-batch-tracking/gpt-initialize`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targets: targetNames,
+        container_concept: containerConcept,
+        prompt_box: batchPrompt.box || null,
+        prompt_points: batchPrompt.containerPoints || [],
+        prompt_labels: batchPrompt.containerLabels || [],
+        target_hints: {},
+      }),
+    });
+    const ret = await res.json();
+    if (ret.log) showRecognizeLog(ret.log, ret.status !== "ok");
+    if (ret.status !== "ok") throw new Error(ret.msg || "GPT 初始化失败");
+    gptPromptDebug = (ret.analysis?.targets || []).flatMap((item) => {
+      const boxes = Array.isArray(item.instance_boxes) ? item.instance_boxes : [];
+      if (!boxes.length) {
+        return [{ ...item, box: item.box || null }];
+      }
+      return boxes.map((box) => ({ ...item, box }));
+    });
+    await syncInstanceList({ silent: true });
+    selectedId = null;
+    maskMeta.textContent = "全部实例";
+    exportSelBtn.disabled = true;
+    if (ret.rendered) {
+      setRenderedImage(ret.rendered);
+    } else if (ret.preview) {
+      setRenderedImage(ret.preview);
+    }
+
+    sam2Targets = {};
+    for (const [objectId, target] of Object.entries(ret.targets || {})) {
+      const id = parseInt(objectId);
+      const colorIdx = Object.keys(sam2Targets).length % sam2TargetColors.length;
+      sam2Targets[id] = {
+        name: target.name || `目标_${id}`,
+        color: sam2TargetColors[colorIdx],
+        points: target.points || [],
+        labels: target.labels || [],
+        manual_points: target.manual_points || [],
+        manual_labels: target.manual_labels || [],
+        gpt_prompt: target.gpt_prompt || "",
+      };
+    }
+    sam2NextTargetId = Math.max(2, ...Object.keys(sam2Targets).map(id => parseInt(id) + 1));
+    sam2SelectedTargetId = Object.keys(sam2Targets).length
+      ? parseInt(Object.keys(sam2Targets)[0])
+      : null;
+    sam2TrackPrompted = Object.keys(sam2Targets).length > 0;
+    sam2TrackEnabled = sam2TrackPrompted;
+    sam2TrackStage = "target";
+    sam2TrackStartBtn.disabled = !sam2TrackPrompted;
+    redrawOverlay();
+    if (sam2TrackStatus) {
+      sam2TrackStatus.textContent = ret.message || "GPT 首图初始化完成，可以开始 SAM2 传播";
+    }
+    appendRecognizeLog(`[GPT] 已建立 ${Object.keys(sam2Targets).length} 个目标 memory，可开始传播`);
+    setStatus(
+      `GPT 智能识别完成：已建立 ${Object.keys(sam2Targets).length} 个目标，点击"开始 SAM2 传播"`,
+      "success",
+    );
+  } catch (err) {
+    appendRecognizeLog(`[错误] ${err.message}`, true);
+    setStatus(err.message, "error");
+    sam2TrackStartBtn.disabled = true;
+  } finally {
+    sam2GptInitBtn.disabled = false;
+  }
+});
+
+async function pollSam2Tracking() {
+  const timer = setInterval(async () => {
+    try {
+      const ret = await (await fetch(`${API}/sam2-batch-tracking/status`)).json();
+      if (sam2TrackStatus) {
+        const message = ret.message || "处理中";
+        const progress = ret.status === "running" ? `（${ret.progress}%）` : "";
+        sam2TrackStatus.textContent = message + progress;
+      }
+      if (ret.status === "done") {
+        clearInterval(timer);
+        batchId = ret.batch_id;
+        batchPromptCaptureEnabled = false;
+        sam2TrackEnabled = false;
+        if (batchExportZipBtn) batchExportZipBtn.disabled = !batchId;
+        // 启用 SAM2 导出按钮
+        const sam2ExportJsonBtn = document.getElementById("sam2ExportJsonBtn");
+        const sam2ExportZipBtn = document.getElementById("sam2ExportZipBtn");
+        if (sam2ExportJsonBtn) sam2ExportJsonBtn.disabled = !batchId;
+        if (sam2ExportZipBtn) sam2ExportZipBtn.disabled = !batchId;
+        batchResultStatus = new Map(batchFiles.map((file, index) => [
+          file.webkitRelativePath || file.name,
+          { file: file.webkitRelativePath || file.name, status: "ok", batch_index: index }
+        ]));
+        renderBatchAssetList();
+        setStatus("SAM2 memory 传播完成，点击左侧图片即可在工作台调整实例", "success");
+        if (batchFiles.length) await selectBatchFile(0);
+      } else if (ret.status === "error") {
+        clearInterval(timer);
+        setStatus("SAM2 传播失败：" + (ret.error || ""), "error");
+      }
+    } catch (err) {
+      clearInterval(timer);
+      setStatus("SAM2 状态查询失败：" + err.message, "error");
+    }
+  }, 1000);
+}
+
+sam2TrackStartBtn?.addEventListener("click", async () => {
+  if (!batchFiles.length) {
+    setStatus("请先选择批量图片", "error");
+    return;
+  }
+  try {
+    sam2TrackStartBtn.disabled = true;
+    if (!sam2TrackUploaded) {
+      setStatus("正在准备 SAM2 memory 批量序列...");
+      await uploadSam2TrackingBatch();
+    }
+    const res = await fetch(`${API}/sam2-batch-tracking/start`, { method: "POST" });
+    const ret = await res.json();
+    if (ret.status !== "ok") throw new Error(ret.msg || "无法开始传播");
+    setStatus("SAM2 正在传播目标 memory...");
+    pollSam2Tracking();
+  } catch (err) {
+    setStatus(err.message, "error");
+    sam2TrackStartBtn.disabled = false;
+  }
+});
+
+// 清除缓存按钮
+document.getElementById("sam2-clear-cache-btn")?.addEventListener("click", async () => {
+  try {
+    const res = await fetch(`${API}/sam2-batch-tracking/clear-cache`, { method: "POST" });
+    const ret = await res.json();
+    setStatus(ret.message || "缓存已清除", "success");
+    document.getElementById("sam2-apply-cache-btn").style.display = "none";
+  } catch (err) {
+    setStatus("清除缓存失败：" + err.message, "error");
+  }
+});
+
+// SAM2 导出 JSON 按钮
+document.getElementById("sam2ExportJsonBtn")?.addEventListener("click", async () => {
+  if (!batchId) {
+    setStatus("请先完成一次 SAM2 批处理", "error");
+    return;
+  }
+  const btn = document.getElementById("sam2ExportJsonBtn");
+  btn.disabled = true;
+  setStatus("正在导出 JSON...");
+  try {
+    const res = await fetch(`${API}/sam2-batch-tracking/export-json/${batchId}`, { method: "POST" });
+    const ret = await res.json();
+    if (ret.status !== "ok") throw new Error(ret.msg);
+    const a = document.createElement("a");
+    a.href = API + ret.json_url;
+    a.download = ret.json_name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setStatus(`已导出 ${ret.total_images} 张图片的 JSON 结果`, "success");
+  } catch (err) {
+    setStatus("JSON 导出失败：" + err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// SAM2 导出 ZIP 按钮
+document.getElementById("sam2ExportZipBtn")?.addEventListener("click", async () => {
+  if (!batchId) {
+    setStatus("请先完成一次 SAM2 批处理", "error");
+    return;
+  }
+  const btn = document.getElementById("sam2ExportZipBtn");
+  btn.disabled = true;
+  setStatus("正在打包 ZIP...");
+  try {
+    const res = await fetch(`${API}/sam2-batch-tracking/export-zip/${batchId}`, { method: "POST" });
+    const ret = await res.json();
+    if (ret.status !== "ok") throw new Error(ret.msg);
+    const a = document.createElement("a");
+    a.href = API + ret.zip_url;
+    a.download = ret.zip_name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setStatus(`已导出 ${ret.total_images} 张图片的 ZIP 结果`, "success");
+  } catch (err) {
+    setStatus("ZIP 导出失败：" + err.message, "error");
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function setBatchPromptStage(stage) {
+  batchPromptCaptureEnabled = true;
+  sam2TrackEnabled = false;
+  batchPromptStage = stage === "target" ? "target" : "container";
+  batchContainerPromptBtn?.classList.toggle("active", batchPromptStage === "container");
+  batchTargetPromptBtn?.classList.toggle("active", batchPromptStage === "target");
+  batchContainerBoxBtn?.classList.remove("active");
+  if (batchPromptStage === "container") setMode("point");
+  if (batchPromptStatus) {
+    batchPromptStatus.textContent = batchPromptStage === "target"
+      ? "当前为目标提示；先填写目标文字，再点击第一张图中的目标区域，例如蛋白。"
+      : "当前为限制区域提示；点击第一张图中的锅。也可以切换到“框选锅区域”缩小搜索范围。";
+  }
+}
+
+batchContainerPromptBtn?.addEventListener("click", () => setBatchPromptStage("container"));
+batchTargetPromptBtn?.addEventListener("click", () => setBatchPromptStage("target"));
+batchContainerBoxBtn?.addEventListener("click", () => {
+  batchPromptCaptureEnabled = true;
+  sam2TrackEnabled = false;
+  batchPromptStage = "container";
+  batchContainerPromptBtn?.classList.remove("active");
+  batchTargetPromptBtn?.classList.remove("active");
+  batchContainerBoxBtn?.classList.add("active");
+  setMode("box");
+  if (batchPromptStatus) {
+    batchPromptStatus.textContent = "当前为框选限制区域；请在第一张图上拖拽框住锅，完成后会限制锅候选搜索范围。";
+  }
+});
+
+if (batchBtn) {
+  batchBtn.onclick = async () => {
+    const files = batchFiles;
+    if (!files.length) {
+      setStatus("请先选择要批量识别的图片", "error");
+      return;
+    }
+
+    const modeVal = "sam3";
+    // 从类别列表构建概念字符串
+    const conceptNames = Object.values(batchConcepts).map(c => c.name.trim()).filter(n => n);
+    const concept = conceptNames.join(",");
+    const containerConcept = batchContainerConcept?.value.trim() || "";
+    if (files.length > 1 && !concept) {
+      setStatus("多图批量必须添加目标类别，请点击「＋ 新建」", "error");
+      return;
+    }
+    if (containerConcept && batchPrompt.ready && !concept) {
+      setStatus("已使用锅区域限制，请添加目标类别；否则只会得到锅实例", "error");
+      return;
+    }
+    if (!batchPrompt.ready && !concept && !containerConcept) {
+      setStatus("请添加目标类别，或填写限制区域（例如：锅）", "error");
+      return;
+    }
+    setStatus(`SAM3 批量识别 ${files.length} 张图片，目标：${conceptNames.join("、")}...`);
+    batchBtn.disabled = true;
+
+    showRecognizeLog(`[批量] SAM3 正在处理 ${files.length} 张图片，目标：${conceptNames.join("、")}...\n`);
+
+    const fd = new FormData();
+    for (const f of files) fd.append("files", f, f.webkitRelativePath || f.name);
+    fd.append("mode", modeVal);
+    fd.append("concept_name", concept);
+    fd.append("container_concept", containerConcept);
+    fd.append("prompt_box", batchPrompt.box ? JSON.stringify(batchPrompt.box) : "");
+    fd.append("prompt_points", JSON.stringify(batchPrompt.containerPoints));
+    fd.append("prompt_labels", JSON.stringify(batchPrompt.containerLabels));
+    fd.append("target_prompt_points", JSON.stringify(batchPrompt.targetPoints));
+    fd.append("target_prompt_labels", JSON.stringify(batchPrompt.targetLabels));
+
+    try {
+      const res = await fetch(`${API}/recognize_batch`, {
+        method: "POST",
+        body: fd,
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        setStatus(`批量识别失败 HTTP ${res.status}`, "error");
+        showRecognizeLog(`[HTTP ${res.status}]\n${text}`, true);
+        return;
+      }
+
+      const ret = await res.json();
+      if (ret.log) showRecognizeLog(ret.log, ret.status !== "ok");
+
+      if (ret.status !== "ok") {
+        setStatus("批量识别失败：" + (ret.msg || ""), "error");
+        return;
+      }
+
+      batchResultStatus = new Map((ret.results || []).map(item => [item.file, item]));
+      batchId = ret.batch_id || null;
+      batchPromptCaptureEnabled = false;
+      sam2TrackEnabled = false;
+      if (batchExportZipBtn) batchExportZipBtn.disabled = !batchId;
+      renderBatchAssetList();
+      const failed = (ret.results || []).filter(item => item.status !== "ok");
+      const failedText = failed.length
+        ? `；失败 ${failed.length} 张：${failed.slice(0, 2).map(item => `${item.file}（${item.msg || "未知原因"}）`).join("、")}`
+        : "";
+      setStatus(`SAM3 批量识别完成：${ret.success}/${ret.total} 成功${failedText}；结果已加载到工作台，请调整实例后点击“下载完整结果包”`,
+        failed.length ? "error" : "success");
+    } catch (err) {
+      setStatus("批量请求失败：" + err.message, "error");
+      showRecognizeLog(`[网络错误]\n${err.message}`, true);
+    } finally {
+      batchBtn.disabled = false;
+    }
+  };
+}
+
+if (batchExportZipBtn) {
+  batchExportZipBtn.onclick = async () => {
+    if (!batchId) {
+      setStatus("请先完成一次批量识别", "error");
+      return;
+    }
+    batchExportZipBtn.disabled = true;
+    setStatus("正在打包所有批量实例（包含已微调结果）...");
+    try {
+      const res = await fetch(
+        `${API}/batch_export_zip/${encodeURIComponent(batchId)}`,
+        { method: "POST" }
+      );
+      const ret = await res.json();
+      if (!res.ok || ret.status !== "ok") {
+        throw new Error(ret.msg || `HTTP ${res.status}`);
+      }
+      const a = document.createElement("a");
+      a.href = API + ret.zip_url;
+      a.download = ret.zip_name || `${batchId}_edited.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setStatus(`已导出 ${ret.success} 张图片的全部实例 ZIP`, "success");
+    } catch (err) {
+      setStatus("批量实例导出失败：" + err.message, "error");
+    } finally {
+      batchExportZipBtn.disabled = !batchId;
+    }
+  };
+}
+
+// ============================================================
+// 左侧模式按钮 + 顶部模式按钮（同步）
+// ============================================================
+function setMode(newMode) {
+  mode = newMode;
+  document.querySelectorAll(".mode-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.mode === newMode);
+  });
+  if (mode === "point")  modeHelp.textContent = "点击已有 mask → 拾取该实例；点击空白 → 创建新实例";
+  if (mode === "box")    modeHelp.textContent = "选中实例后拖拽 → 更新该实例；未选中时创建新实例";
+  if (mode === "refine") modeHelp.textContent = "单击=前景点 · Ctrl/Alt+单击=背景点 · 细化选中实例";
+}
+
+document.querySelectorAll(".mode-btn").forEach((btn) => {
+  btn.onclick = () => setMode(btn.dataset.mode);
+});
+
+if (zoomInBtn) zoomInBtn.onclick = () => setZoom(zoomFactor + 0.1);
+if (zoomOutBtn) zoomOutBtn.onclick = () => setZoom(zoomFactor - 0.1);
+
+function setWorkflowTask(task) {
+  workflowTask = task === "detection" ? "detection" : "segmentation";
+  if (textTask) textTask.value = workflowTask;
+  taskSegBtn?.classList.toggle("active", workflowTask === "segmentation");
+  taskDetBtn?.classList.toggle("active", workflowTask === "detection");
+  if (workflowTaskTitle) {
+    workflowTaskTitle.textContent = workflowTask === "detection" ? "图像检测" : "图像分割";
+  }
+  const workflowContext = document.getElementById("topWorkflowContext");
+  if (workflowContext) {
+    workflowContext.textContent = workflowTask === "detection"
+      ? "按名称生成检测框"
+      : "按名称生成分割区域";
+  }
+  if (textDetectBtn) {
+    textDetectBtn.textContent = workflowTask === "detection" ? "开始图像检测" : "开始图像分割";
+  }
+}
+
+taskSegBtn?.addEventListener("click", () => setWorkflowTask("segmentation"));
+taskDetBtn?.addEventListener("click", () => setWorkflowTask("detection"));
+
+advancedToggleBtn?.addEventListener("click", () => {
+  const advanced = document.querySelectorAll(".advanced-panel");
+  const shouldShow = !document.querySelector(".advanced-panel.visible");
+  advanced.forEach(panel => panel.classList.toggle("visible", shouldShow));
+  advancedToggleBtn.textContent = shouldShow ? "隐藏高级工具" : "显示高级工具";
+});
+
+setWorkflowTask("segmentation");
+
+if (categoryList) {
+  categoryList.addEventListener("click", (event) => {
+    const item = event.target.closest(".category-item");
+    if (!item) return;
+    activeCategory = item.dataset.category || item.querySelector(".category-name")?.value?.trim() || "object";
+    categoryList.querySelectorAll(".category-item").forEach(el => {
+      el.classList.toggle("selected", el === item);
+    });
+    setStatus(`当前类别：${activeCategory}`);
+  });
+}
+
+if (categoryActions.length >= 2) {
+  categoryActions[0].onclick = () => {
+    const name = window.prompt("输入新类别名称");
+    const cleanName = name?.trim();
+    if (!cleanName || [...categoryList.querySelectorAll(".category-item")]
+      .some(item => item.dataset.category === cleanName)) return;
+    const item = document.createElement("div");
+    item.className = "category-item";
+    item.dataset.category = cleanName;
+    item.innerHTML = `<i class="category-dot blue"></i><input class="category-name" value="" aria-label="类别名称">`;
+    item.querySelector(".category-name").value = cleanName;
+    categoryList.appendChild(item);
+    bindCategoryItem(item);
+    item.click();
+  };
+  categoryActions[1].onclick = () => {
+    const selected = categoryList.querySelector(".category-item.selected");
+    if (!selected) return;
+    if (categoryList.querySelectorAll(".category-item").length <= 1) {
+      setStatus("至少保留一个类别", "error");
+      return;
+    }
+    const removed = selected.dataset.category || selected.textContent.trim();
+    selected.remove();
+    const next = categoryList.querySelector(".category-item");
+    next?.click();
+    setStatus(`已删除类别：${removed}`);
+  };
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.target instanceof Element &&
+      event.target.matches("input, select, textarea")) return;
+  const key = event.key.toLowerCase();
+  if (key === "v") setMode("point");
+  if (key === "r") setMode("box");
+  if (key === "p") setMode("refine");
+  if (key === "+" || key === "=") setZoom(zoomFactor + 0.1);
+  if (key === "-") setZoom(zoomFactor - 0.1);
+  if (key === "0") setZoom(1);
+});
+
+// ============================================================
+canvasOverlay.addEventListener("pointerdown", (e) => {
+  if (!originImg) return;
+  if (mode !== "box") return;
+  canvasOverlay.setPointerCapture?.(e.pointerId);
+  isDragging = true;
+  dragStart = toImageCoords(e.clientX, e.clientY);
+  dragCur   = dragStart;
+  redrawOverlay();
+  e.preventDefault();
+});
+
+canvasOverlay.addEventListener("pointermove", (e) => {
+  if (!isDragging) return;
+  dragCur = toImageCoords(e.clientX, e.clientY);
+  redrawOverlay();
+});
+
+canvasOverlay.addEventListener("pointerup", async (e) => {
+  if (!originImg) return;
+  if (mode !== "box" || !isDragging) return;
+  canvasOverlay.releasePointerCapture?.(e.pointerId);
+
+  const rect = canvasOverlay.getBoundingClientRect();
+  const dxPx = Math.abs((dragCur.x - dragStart.x) / originW * rect.width);
+  const dyPx = Math.abs((dragCur.y - dragStart.y) / originH * rect.height);
+  isDragging = false;
+
+  if (dxPx < BOX_DRAG_PX || dyPx < BOX_DRAG_PX) {
+    dragStart = dragCur = null;
+    redrawOverlay();
+    return;
+  }
+
+  const box = [
+    Math.min(dragStart.x, dragCur.x),
+    Math.min(dragStart.y, dragCur.y),
+    Math.max(dragStart.x, dragCur.x),
+    Math.max(dragStart.y, dragCur.y),
+  ];
+  if (isBatchPromptCaptureActive()) {
+    batchPrompt.box = box;
+    batchPrompt.ready = true;
+    if (batchBtn) batchBtn.disabled = false;
+    if (batchPromptStatus) batchPromptStatus.textContent = "状态：首张框选提示已记录，可以开始批量识别";
+  }
+  showPulse((box[0] + box[2]) / 2, (box[1] + box[3]) / 2);
+  dragStart = dragCur = null;
+
+  if (isBatchPromptCaptureActive()) {
+    setStatus("已记录首张 SAM3 框选提示，可以开始批量识别", "success");
+    return;
+  }
+
+  // SAM2 批处理框选限制区域
+  if (sam2TrackEnabled && sam2TrackStage === "container" && activeBatchIndex === 0) {
+    try {
+      if (!sam2TrackUploaded) {
+        setStatus("正在准备 SAM2 memory 批量序列...");
+        await uploadSam2TrackingBatch();
+      }
+      const res = await fetch(`${API}/sam2-batch-tracking/prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stage: "container",
+          points: [],
+          labels: [],
+          box: box,
+        }),
+      });
+      const ret = await res.json();
+      if (ret.status !== "ok") {
+        setStatus(ret.msg || "SAM2 框选限制区域失败", "error");
+        return;
+      }
+      sam2TrackStatus.textContent = ret.message || "已框选限制区域。请点击「＋ 新建」创建目标类别，选中后点击画布。";
+      setStatus("已框选限制区域", "success");
+      return;
+    } catch (err) {
+      setStatus("SAM2 框选失败：" + err.message, "error");
+      return;
+    }
+  }
+
+  const editingId = selectedId;
+  setStatus(editingId == null ? "正在根据框选生成分割..." : `正在用框选更新实例 ${editingId}...`);
+  try {
+    const res = await fetch(API + (editingId == null ? "/predict_prompt" : "/add_box"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(editingId == null
+        ? { box, name: getPromptName() }
+        : { x1: box[0], y1: box[1], x2: box[2], y2: box[3] }),
+    });
+    const ret = await res.json();
+    if (ret.status !== "ok") {
+      setStatus("生成失败：" + (ret.msg || ""), "error");
+      return;
+    }
+    if (editingId == null) {
+      await applyNewInstance(ret);
+      setStatus("已创建实例 " + ret.id, "success");
+    } else {
+      await syncInstanceList({ silent: true });
+      selectedId = editingId;
+      renderList();
+      updateInspector();
+      if (ret.rendered) setRenderedImage(ret.rendered);
+      setStatus("已更新实例 " + editingId, "success");
+    }
+  } catch (err) {
+    setStatus("请求失败：" + err.message, "error");
+  }
+});
+
+canvasOverlay.addEventListener("pointercancel", () => {
+  isDragging = false;
+  dragStart = dragCur = null;
+  redrawOverlay();
+});
+
+canvasOverlay.addEventListener("click", async (e) => {
+  if (!originImg) return;
+  const p = toImageCoords(e.clientX, e.clientY);
+
+  if (sam2CorrectionEnabled && activeBatchIndex === 0 && batchFiles.length
+      && sam2TrackStage === "target") {
+    const handled = await applySam2CorrectionPoint(p);
+    if (handled) {
+      showPulse(p.x, p.y);
+      return;
+    }
+  }
+
+  if (sam2TrackEnabled && activeBatchIndex === 0 && batchFiles.length && sam2TrackStage) {
+    const stage = sam2TrackStage;
+    
+    // 目标阶段需要选中一个目标类别
+    if (stage === "target" && (sam2SelectedTargetId === null || sam2SelectedTargetId === undefined)) {
+      setStatus("请先在左侧选中或新建一个目标类别", "error");
+      return;
+    }
+    
+    // 为当前阶段记录点击点
+    sam2TrackPrompt[stage].push([p.x, p.y]);
+    try {
+      if (!sam2TrackUploaded) {
+        setStatus("正在准备 SAM2 memory 批量序列...");
+        await uploadSam2TrackingBatch();
+      }
+      
+      // 构建请求参数
+      const requestBody = {
+        stage,
+        points: sam2TrackPrompt[stage],
+        labels: sam2TrackPrompt[stage].map(() => 1),
+        name: stage === "container" ? "锅" : (sam2Targets[sam2SelectedTargetId]?.name || `目标_${sam2SelectedTargetId}`),
+      };
+      
+      // 目标阶段传入 target_id
+      if (stage === "target") {
+        requestBody.target_id = sam2SelectedTargetId;
+      }
+      
+      const res = await fetch(`${API}/sam2-batch-tracking/prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+      const ret = await res.json();
+      if (ret.status !== "ok") {
+        sam2TrackPrompt[stage].pop();
+        setStatus(ret.msg || "SAM2 点击提示失败", "error");
+        return;
+      }
+      
+      if (stage === "container") {
+        sam2TrackStatus.textContent = "锅已锁定。现在请点击「＋ 新建」创建目标类别，选中后点击画布。";
+      } else {
+        // 更新选中目标的点击点
+        const objectId = ret.object_id || sam2SelectedTargetId;
+        if (sam2Targets[objectId]) {
+          sam2Targets[objectId].points = sam2TrackPrompt["target"].slice();
+          sam2Targets[objectId].labels = sam2TrackPrompt["target"].map(() => 1);
+        }
+        
+        // 更新目标列表显示
+        updateSam2TargetList();
+        
+        sam2TrackPrompted = true;
+        sam2TrackStatus.textContent = `目标 '${requestBody.name}' (ID=${objectId}) memory 已建立，可以继续添加更多目标或开始传播。`;
+        sam2TrackStartBtn.disabled = false;
+      }
+      showPulse(p.x, p.y);
+      setStatus(stage === "container" ? "已锁定锅区域" : `已建立目标 '${requestBody.name}' memory`, "success");
+    } catch (err) {
+      sam2TrackPrompt[stage].pop();
+      setStatus("SAM2 点击失败：" + err.message, "error");
+    }
+    return;
+  }
+
+  if (mode === "point") {
+    if (isBatchPromptCaptureActive()) {
+      const label = (e.ctrlKey || e.altKey || e.metaKey) ? 0 : 1;
+      if (batchPromptStage === "target") {
+        batchPrompt.targetPoints.push([p.x, p.y]);
+        batchPrompt.targetLabels.push(label);
+      } else {
+        batchPrompt.containerPoints.push([p.x, p.y]);
+        batchPrompt.containerLabels.push(label);
+      }
+      batchPrompt.ready = true;
+      if (batchBtn) batchBtn.disabled = false;
+      const count = batchPromptStage === "target"
+        ? batchPrompt.targetPoints.length : batchPrompt.containerPoints.length;
+      if (batchPromptStatus) batchPromptStatus.textContent =
+        `状态：已记录${batchPromptStage === "target" ? "目标" : "限制区域"}提示点 ${count} 个，可以开始批量识别`;
+      showPulse(p.x, p.y);
+      setStatus("已记录首张 SAM3 提示点，可以开始批量识别", "success");
+      return;
+    }
+    setStatus("检测中...");
+    const hit = await tryPickInstance(p);
+
+    if (hit != null) {
+      selectedId = hit;
+      maskMeta.textContent = "实例 " + hit;
+      exportSelBtn.disabled = false;
+      try {
+        await fetch(API + "/select_instance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: hit }),
+        });
+      } catch (err) {}
+      renderList();
+      updateInspector();
+      scrollToInstance(hit);
+      await refreshRendered(hit);
+      setStatus(`已拾取实例 ${hit}`, "success");
+      return;
+    }
+
+    showPulse(p.x, p.y);
+    setStatus("正在生成分割...");
+    try {
+      const res = await fetch(API + "/predict_prompt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          points: [{ x: p.x, y: p.y, label: 1 }],
+          name: getPromptName(),
+        }),
+      });
+      const ret = await res.json();
+      if (ret.status !== "ok") {
+        setStatus("生成失败：" + (ret.msg || ""), "error");
+        return;
+      }
+      await applyNewInstance(ret);
+      setStatus("已创建实例 " + ret.id, "success");
+    } catch (err) {
+      setStatus("请求失败：" + err.message, "error");
+    }
+    return;
+  }
+
+  if (mode === "refine") {
+    if (selectedId === null) {
+      setStatus("请先在列表中选择一个实例", "error");
+      return;
+    }
+    const label = (e.ctrlKey || e.altKey || e.metaKey) ? 0 : 1;
+    showPulse(p.x, p.y);
+    setStatus(label ? "添加前景点..." : "添加背景点...");
+    try {
+      const res = await fetch(API + "/add_point", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ x: p.x, y: p.y, label }),
+      });
+      const ret = await res.json();
+      if (ret.status !== "ok") {
+        setStatus("细化失败：" + (ret.msg || ""), "error");
+        return;
+      }
+      if (ret.rendered) setRenderedImage(ret.rendered);
+
+      const myToken = ++renderToken;
+      setTimeout(async () => {
+        if (myToken !== renderToken) return;
+        await refreshRendered(selectedId);
+      }, NEW_HIGHLIGHT_MS);
+
+      setStatus("已" + (label ? "添加前景点" : "添加背景点"), "success");
+    } catch (err) {
+      setStatus("请求失败：" + err.message, "error");
+    }
+  }
+});
+
+// ============================================================
+async function uploadImageFile(file) {
+  if (!file) return;
+  const imageLike = file.type.startsWith("image/") ||
+    /\.(png|jpe?g|webp|bmp|tif?f)$/i.test(file.name || "");
+  if (!imageLike) {
+    setStatus("请选择图片文件（JPG、PNG 或 WEBP）", "error");
+    return;
+  }
+
+  clearAll();
+  assetFileLabel.textContent = file.name;
+
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    const s = ((Date.now() - t0) / 1000).toFixed(0);
+    setStatus(`正在上传图片，请稍候... (${s}s)`);
+  }, 500);
+
+  const fd = new FormData();
+  fd.append("file", file);
+
+  try {
+    const res = await fetch(API + "/upload", { method: "POST", body: fd });
+    clearInterval(timer);
+    const ret = await res.json();
+    if (ret.status !== "ok") {
+      setStatus("上传失败：" + (ret.msg || ""), "error");
+      return;
+    }
+    const ok = await loadOrigin();
+    if (!ok) return;
+    await loadAllMasks();
+    setStatus("图片已上传，请从左侧选择检测、分割或点选修复功能。", "success");
+  } catch (err) {
+    clearInterval(timer);
+    setStatus("请求失败：" + err.message, "error");
+  }
+}
+
+function releaseBatchObjectUrls() {
+  for (const url of batchObjectUrls.values()) URL.revokeObjectURL(url);
+  batchObjectUrls.clear();
+}
+
+function normalizeBatchFiles(files) {
+  const unique = new Map();
+  for (const file of files || []) {
+    const imageLike = file.type.startsWith("image/") ||
+      /\.(png|jpe?g|webp|bmp|tif?f)$/i.test(file.name || "");
+    if (!imageLike) continue;
+    const key = `${file.webkitRelativePath || file.name}:${file.size}:${file.lastModified}`;
+    if (!unique.has(key)) unique.set(key, file);
+  }
+  return [...unique.values()];
+}
+
+function renderBatchAssetList() {
+  if (!batchAssetList) return;
+  releaseBatchObjectUrls();
+  batchAssetList.innerHTML = "";
+  if (!batchFiles.length) {
+    batchAssetList.innerHTML = '<div class="batch-asset-empty">可在右侧高级工具中选择图片或文件夹</div>';
+    return;
+  }
+  batchFiles.forEach((file, index) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "batch-asset" + (index === activeBatchIndex ? " active" : "");
+    row.title = file.webkitRelativePath || file.name;
+
+    const thumb = document.createElement("img");
+    thumb.className = "batch-asset-thumb";
+    const url = URL.createObjectURL(file);
+    batchObjectUrls.set(index, url);
+    thumb.src = url;
+    thumb.alt = "";
+
+    const name = document.createElement("span");
+    name.className = "batch-asset-name";
+    name.textContent = file.webkitRelativePath || file.name;
+
+    const number = document.createElement("span");
+    number.className = "batch-asset-index";
+    const result = batchResultStatus.get(file.webkitRelativePath || file.name);
+    number.textContent = result
+      ? (result.status === "ok" ? "完成" : "失败")
+      : `${index + 1}/${batchFiles.length}`;
+    if (result) {
+      number.classList.add(result.status === "ok" ? "batch-ok" : "batch-fail");
+    }
+
+    row.append(thumb, name, number);
+    row.addEventListener("click", () => selectBatchFile(index));
+    batchAssetList.appendChild(row);
+  });
+}
+
+async function selectBatchFile(index) {
+  const file = batchFiles[index];
+  if (!file) return;
+  activeBatchIndex = index;
+  renderBatchAssetList();
+  setStatus(`正在打开第 ${index + 1}/${batchFiles.length} 张图片...`);
+  await uploadImageFile(file);
+  const result = batchResultStatus.get(file.webkitRelativePath || file.name);
+  if (batchId && result?.status === "ok") {
+    try {
+      const response = await fetch(
+        `${API}/batch_result/${encodeURIComponent(batchId)}/${index}`
+      );
+      const loaded = await response.json();
+      if (loaded.status === "ok") {
+        await syncInstanceList({ silent: true });
+        if (loaded.rendered) setRenderedImage(loaded.rendered);
+        // 刷新渲染以显示所有实例
+        await refreshRendered(null);
+        setStatus(
+          `已打开第 ${index + 1}/${batchFiles.length} 张：${file.name}，实例 ${loaded.count} 个`,
+          "success"
+        );
+        return;
+      }
+    } catch (err) {
+      setStatus("批量实例回显失败：" + err.message, "error");
+    }
+  }
+  setStatus(`已打开第 ${index + 1}/${batchFiles.length} 张：${file.name}`, "success");
+}
+
+function setBatchFiles(files, openFirst = true) {
+  batchFiles = normalizeBatchFiles(files);
+  sam2TrackStage = "container";
+  sam2TrackPrompt = { container: [], target: [] };
+  sam2TrackUploaded = false;
+  sam2TrackPrompted = false;
+  sam2TrackEnabled = false;
+  if (sam2TrackStartBtn) sam2TrackStartBtn.disabled = true;
+  setSam2TrackStage("container");
+  batchPromptStage = "container";
+  batchPromptCaptureEnabled = batchFiles.length > 0;
+  batchPrompt = {
+    containerPoints: [], containerLabels: [], box: null,
+    targetPoints: [], targetLabels: [], ready: false
+  };
+  if (batchFileSummary) {
+    batchFileSummary.textContent = batchFiles.length
+      ? `已选择 ${batchFiles.length} 张图片${files.some(file => file.webkitRelativePath) ? "（来自文件夹）" : ""}`
+      : "尚未选择图片";
+  }
+  // 启用GPT初始化按钮
+  if (sam2GptInitBtn) sam2GptInitBtn.disabled = batchFiles.length === 0;
+  if (batchPromptStatus) batchPromptStatus.textContent = batchFiles.length
+    ? '已选择图片；请输入目标类别并点击"GPT 智能识别"'
+    : "先选择图片；之后可填写目标和限制区域，或在第一张图上点击/框选";
+  batchResultStatus = new Map();
+  batchId = null;
+  if (batchExportZipBtn) batchExportZipBtn.disabled = true;
+  activeBatchIndex = batchFiles.length ? 0 : -1;
+  renderBatchAssetList();
+  if (batchBtn) batchBtn.disabled = batchFiles.length === 0;
+  if (batchFiles.length && openFirst) {
+    selectBatchFile(0);
+  } else if (batchFiles.length) {
+    setStatus(`已加入 ${batchFiles.length} 张图片，可点击左侧列表逐张打开`, "success");
+  }
+}
+
+fileInput.onchange = (e) => {
+  uploadImageFile(e.target.files[0]);
+};
+
+document.getElementById("emptyUploadBtn").onclick = () => fileInput.click();
+
+["dragenter", "dragover"].forEach((eventName) => {
+  document.addEventListener(eventName, (e) => {
+    if (!e.dataTransfer || ![...e.dataTransfer.types].includes("Files")) return;
+    e.preventDefault();
+    uploadDropzone?.classList.add("dragover");
+    document.querySelector(".stage")?.classList.add("dragover");
+  });
+});
+["dragleave", "drop"].forEach((eventName) => {
+  document.addEventListener(eventName, (e) => {
+    if (!e.dataTransfer || ![...e.dataTransfer.types].includes("Files")) return;
+    e.preventDefault();
+    uploadDropzone?.classList.remove("dragover");
+    document.querySelector(".stage")?.classList.remove("dragover");
+  });
+});
+document.querySelector(".stage").addEventListener("drop", (e) => {
+  const file = e.dataTransfer?.files?.[0];
+  if (file) uploadImageFile(file);
+});
+
+document.getElementById("resetBtn").onclick = async () => {
+  try { await fetch(API + "/reset", { method: "POST" }); } catch (err) {}
+  clearAll();
+  assetFileLabel.textContent = "尚未上传图片";
+  setStatus("已重置，请重新上传图片。");
+};
+
+// ============================================================
+function downloadJSON(data, filenamePrefix) {
+  const text = JSON.stringify(data, null, 2);
+  const sizeKB = Math.round(text.length / 1024);
+  const blob = new Blob([text], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a   = document.createElement("a");
+  a.href = url;
+  a.download = `${filenamePrefix}_${Date.now()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  return sizeKB;
+}
+
+document.getElementById("exportAllBtn").onclick = async () => {
+  if (allInstances.length === 0) {
+    setStatus("没有可导出的实例", "error");
+    return;
+  }
+  setStatus("正在请求导出...");
+  let res;
+  try { res = await fetch(API + "/export", { method: "POST" }); }
+  catch (err) { setStatus("导出失败：无法连接后端", "error"); return; }
+
+  if (!res.ok) {
+    setStatus(`导出失败 HTTP ${res.status}`, "error");
+    return;
+  }
+  const data = await res.json();
+  if (data.status === "error") {
+    setStatus("导出失败：" + (data.msg || ""), "error");
+    return;
+  }
+  if (!Array.isArray(data.instances) || data.instances.length === 0) {
+    setStatus("后端返回 0 个实例，请刷新列表后重试", "error");
+    return;
+  }
+  const sizeKB = downloadJSON(data, "sam2_all");
+  setStatus(`已导出 ${data.instances.length} 个实例（约 ${sizeKB} KB）`, "success");
+};
+
+exportSelBtn.onclick = async () => {
+  if (selectedId == null) {
+    setStatus("请先拾取一个实例", "error");
+    return;
+  }
+  setStatus(`正在导出实例 ${selectedId}...`);
+  let res;
+  try {
+    res = await fetch(API + "/export_one", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: selectedId }),
+    });
+  } catch (err) { setStatus("导出失败", "error"); return; }
+
+  if (!res.ok) {
+    setStatus(`导出失败 HTTP ${res.status}`, "error");
+    return;
+  }
+  const data = await res.json();
+  if (data.status === "error") {
+    setStatus("导出失败：" + (data.msg || ""), "error");
+    return;
+  }
+  const sizeKB = downloadJSON(data, `sam2_instance_${selectedId}`);
+  setStatus(`已导出实例 ${selectedId}（约 ${sizeKB} KB）`, "success");
+};
+
+function base64ToBlob(base64, mime) {
+  const byteChars = atob(base64);
+  const byteNums  = new Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) {
+    byteNums[i] = byteChars.charCodeAt(i);
+  }
+  return new Blob([new Uint8Array(byteNums)], { type: mime });
+}
+
+exportZipBtn.onclick = async () => {
+  if (allInstances.length === 0) {
+    setStatus("没有可导出的实例", "error");
+    return;
+  }
+  setStatus("正在打包所有结果（含全部图像，请稍候）...");
+  exportZipBtn.disabled = true;
+
+  let res;
+  try {
+    res = await fetch(API + "/export_zip", { method: "POST" });
+  } catch (err) {
+    setStatus("打包失败：无法连接后端", "error");
+    exportZipBtn.disabled = false;
+    return;
+  } finally {
+    exportZipBtn.disabled = false;
+  }
+
+  if (!res.ok) {
+    setStatus(`打包失败 HTTP ${res.status}`, "error");
+    return;
+  }
+  const data = await res.json();
+  if (data.status === "error") {
+    setStatus("打包失败：" + (data.msg || ""), "error");
+    return;
+  }
+  if (!data.zip_base64) {
+    setStatus("后端未返回 zip 数据", "error");
+    return;
+  }
+
+  const blob = base64ToBlob(data.zip_base64, "application/zip");
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href     = url;
+  a.download = `sam2_full_export_${Date.now()}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  const sizeKB = Math.round(blob.size / 1024);
+  setStatus(`已下载完整结果包（${data.count} 个实例，约 ${sizeKB} KB）`, "success");
+};
+
+// ============================================================
+window.addEventListener("resize", () => {
+  if (!originImg) return;
+  fitCanvas();
+  redrawOrigin();
+  redrawOverlay();
+});
+
+// 页面刷新后恢复后端当前工作区，避免用户丢失已上传图片和实例。
+(async function restoreWorkspace() {
+  try {
+    const res = await fetch(API + "/image");
+    const data = await res.json();
+    if (!data.image) return;
+    assetFileLabel.textContent = "当前工作图片";
+    if (await loadOrigin()) {
+      await loadAllMasks();
+      setStatus(`已恢复当前工作区：${allInstances.length} 个实例`, "success");
+    }
+  } catch (err) {
+    setStatus("后端未连接，请确认 sam_backen.py 正在运行", "error");
+  }
+})();
+</script>
+</body>
+</html>
